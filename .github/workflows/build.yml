@@ -30,15 +30,15 @@ jobs:
         uses: actions/cache@v4
         with:
           path: C:\vc9
-          key: vc9-sdk70-v1
+          key: vc9-sdk70-v2
 
-      - name: Cache SDK ISO
+      - name: Cache ISOs
         if: steps.vc9cache.outputs.cache-hit != 'true'
         id: isocache
         uses: actions/cache@v4
         with:
-          path: C:\iso\GRMSDK_EN_DVD.iso
-          key: grmsdk-en-dvd-iso
+          path: C:\iso
+          key: isos-v2
 
       - name: Download SDK ISO
         if: steps.vc9cache.outputs.cache-hit != 'true' && steps.isocache.outputs.cache-hit != 'true'
@@ -46,44 +46,47 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path C:\iso | Out-Null
           Invoke-WebRequest -Uri "https://archive.org/download/grmsdkx-en-dvd/GRMSDK_EN_DVD.iso" -OutFile C:\iso\GRMSDK_EN_DVD.iso -TimeoutSec 3000
+          Invoke-WebRequest -Uri "https://archive.org/download/vs-2008-express-with-sp-1-esnx-1504732/VS2008ExpressWithSP1ESNx1504732.iso" -OutFile C:\iso\VS2008Express.iso -TimeoutSec 4000
 
-      - name: Extract VC9 toolchain from ISO (msiexec /a)
+      - name: Extract VC9 toolchain from ISOs (msiexec /a)
         if: steps.vc9cache.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
-          $mount = Mount-DiskImage -ImagePath C:\iso\GRMSDK_EN_DVD.iso -PassThru
-          $drive = ($mount | Get-Volume).DriveLetter
-          Write-Host "=== ISO root:"; Get-ChildItem "$drive`:\" | ForEach-Object Name
-          Write-Host "=== Setup dir:"; Get-ChildItem "$drive`:\Setup" -ErrorAction SilentlyContinue | ForEach-Object Name
-          Write-Host "=== all MSI on ISO:"
-          Get-ChildItem "$drive`:\" -Recurse -Filter *.msi -ErrorAction SilentlyContinue | ForEach-Object FullName
-          # Admin-extract every msi that plausibly contains compilers/headers/libs
-          New-Item -ItemType Directory -Force -Path C:\vc9ext | Out-Null
-          Get-ChildItem "$drive`:\" -Recurse -Include vc_stdx86.msi,winsdk_intellidocs.msi,*.msi -ErrorAction SilentlyContinue |
-            Where-Object { $_.Name -match "vc_std|WinSDKBuild|WinSDKInterop|WinSDK_|WinSDKWin32Tools|winsdk" } |
+          # --- SDK 7.1: Windows headers/libs (совместимы с VS2008) ---
+          $m1 = Mount-DiskImage -ImagePath C:\iso\GRMSDK_EN_DVD.iso -PassThru
+          $d1 = ($m1 | Get-Volume).DriveLetter
+          New-Item -ItemType Directory -Force -Path C:\sdkext | Out-Null
+          foreach ($msi in @("Setup\WinSDKBuild\WinSDKBuild_x86.msi","Setup\WinSDK\WinSDK_x86.msi","Setup\WinSDKInterop\WinSDKInterop_x86.msi","Setup\WinSDKWin32Tools\WinSDKWin32Tools_x86.msi")) {
+            $f = "$d1`:\$msi"
+            if (Test-Path $f) { Write-Host ">>> $f"; Start-Process -Wait msiexec -ArgumentList "/a `"$f`" /qn TARGETDIR=C:\sdkext\$([IO.Path]::GetFileNameWithoutExtension($msi))" }
+          }
+          # --- VS2008 Express SP1: компилятор VC9 ---
+          $m2 = Mount-DiskImage -ImagePath C:\iso\VS2008Express.iso -PassThru
+          $d2 = ($m2 | Get-Volume).DriveLetter
+          Write-Host "=== Express ISO root:"; Get-ChildItem "$d2`:\" | ForEach-Object Name
+          Get-ChildItem "$d2`:\" -Recurse -Filter *.msi -ErrorAction SilentlyContinue | ForEach-Object FullName
+          Get-ChildItem "$d2`:\" -Recurse -Filter *.cab -ErrorAction SilentlyContinue | Select-Object -First 20 | ForEach-Object FullName
+          New-Item -ItemType Directory -Force -Path C:\vcext | Out-Null
+          Get-ChildItem "$d2`:\" -Recurse -Filter *.msi -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match "vc|VC" } |
             ForEach-Object {
-              $n = $_.BaseName
               Write-Host ">>> extracting $($_.FullName)"
-              Start-Process -Wait msiexec -ArgumentList "/a `"$($_.FullName)`" /qn TARGETDIR=C:\vc9ext\$n"
+              Start-Process -Wait msiexec -ArgumentList "/a `"$($_.FullName)`" /qn TARGETDIR=C:\vcext\$($_.BaseName)"
             }
-          Write-Host "=== extracted cl.exe candidates:"
-          Get-ChildItem C:\vc9ext -Recurse -Filter cl.exe -ErrorAction SilentlyContinue | ForEach-Object FullName
-          Write-Host "=== extracted include dirs:"
-          Get-ChildItem C:\vc9ext -Recurse -Directory -Filter Include -ErrorAction SilentlyContinue | Select-Object -First 10 | ForEach-Object FullName
-          # Stage: find x86 cl.exe, take its VC root; find SDK include/lib
-          $cl = Get-ChildItem C:\vc9ext -Recurse -Filter cl.exe -ErrorAction SilentlyContinue | Where-Object { $_.FullName -notmatch "amd64|x64|ia64" } | Select-Object -First 1
-          if (-not $cl) { throw "no cl.exe extracted — inspect listing above" }
+          Write-Host "=== Express cl.exe:"
+          Get-ChildItem C:\vcext -Recurse -Filter cl.exe -ErrorAction SilentlyContinue | ForEach-Object FullName
+          # --- staging ---
+          $cl = Get-ChildItem C:\vcext -Recurse -Filter cl.exe -ErrorAction SilentlyContinue | Where-Object { $_.FullName -notmatch "amd64|x64|ia64" } | Select-Object -First 1
+          if (-not $cl) { throw "no VC9 cl.exe extracted from Express — inspect listing" }
           New-Item -ItemType Directory -Force -Path C:\vc9 | Out-Null
-          # VC root = two levels up from bin\cl.exe
           $vcroot = Split-Path (Split-Path $cl.FullName)
           Copy-Item -Recurse -Force $vcroot C:\vc9\VC
-          $sdkinc = Get-ChildItem C:\vc9ext -Recurse -Directory -Filter Include | Where-Object { Test-Path (Join-Path $_.FullName "Windows.h") } | Select-Object -First 1
-          if ($sdkinc) {
-            $sdkroot = Split-Path $sdkinc.FullName
-            Copy-Item -Recurse -Force $sdkroot C:\vc9\SDK
-          }
-          Get-ChildItem C:\vc9 -Depth 2 | Select-Object -First 40 | ForEach-Object FullName
+          $sdkinc = Get-ChildItem C:\sdkext -Recurse -Directory -Filter Include | Where-Object { Test-Path (Join-Path $_.FullName "Windows.h") } | Select-Object -First 1
+          if (-not $sdkinc) { throw "no SDK Include with Windows.h" }
+          Copy-Item -Recurse -Force (Split-Path $sdkinc.FullName) C:\vc9\SDK
+          Write-Host "=== staged:"; Get-ChildItem C:\vc9\VC\bin\cl.exe; Get-ChildItem C:\vc9\SDK
           Dismount-DiskImage -ImagePath C:\iso\GRMSDK_EN_DVD.iso
+          Dismount-DiskImage -ImagePath C:\iso\VS2008Express.iso
 
       - name: Install jom + portable CMake 3.16
         shell: pwsh
