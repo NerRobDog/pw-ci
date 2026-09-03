@@ -30,7 +30,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: C:\vc9
-          key: vc9-sdk70-v2
+          key: vc9-sdk70-v3
 
       - name: Cache ISOs
         if: steps.vc9cache.outputs.cache-hit != 'true'
@@ -91,6 +91,12 @@ jobs:
           New-Item -ItemType Directory -Force -Path C:\vc9 | Out-Null
           $vcroot = Split-Path (Split-Path $cl.FullName)
           Copy-Item -Recurse -Force $vcroot C:\vc9\VC
+          $vsroot = Split-Path $vcroot
+          if (Test-Path "$vsroot\Common7") { Copy-Item -Recurse -Force "$vsroot\Common7" C:\vc9\Common7 }
+          # msvcr90 runtime рядом с компилятором
+          Get-ChildItem "$vcroot\redist" -Recurse -Filter *.dll -ErrorAction SilentlyContinue | Where-Object { $_.FullName -match "VC90.CRT" -and $_.FullName -notmatch "amd64|ia64" } | ForEach-Object { Copy-Item $_.FullName C:\vc9\VC\bin\ }
+          Get-ChildItem C:\vc9\VC\bin | Select-Object -First 30 | ForEach-Object Name
+          Get-ChildItem C:\vc9\Common7\IDE -Filter mspdb* -ErrorAction SilentlyContinue | ForEach-Object Name
           $sdkinc = Get-ChildItem C:\sdkext -Recurse -Directory -Filter Include | Where-Object { Test-Path (Join-Path $_.FullName "Windows.h") } | Select-Object -First 1
           if (-not $sdkinc) { throw "no SDK Include with Windows.h" }
           Copy-Item -Recurse -Force (Split-Path $sdkinc.FullName) C:\vc9\SDK
@@ -109,7 +115,7 @@ jobs:
       - name: Configure and build (Release)
         shell: cmd
         run: |
-          set "PATH=C:\vc9\VC\bin;C:\jom;C:\cmake316\cmake-3.16.9-win64-x64\bin;%PATH%"
+          set "PATH=C:\vc9\VC\bin;C:\vc9\Common7\IDE;C:\jom;C:\cmake316\cmake-3.16.9-win64-x64\bin;%PATH%"
           set "INCLUDE=C:\vc9\VC\include;C:\vc9\SDK\Include"
           set "LIB=C:\vc9\VC\lib;C:\vc9\SDK\Lib"
           cl 2>&1 | findstr /i version
