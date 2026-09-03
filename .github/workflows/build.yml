@@ -30,7 +30,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: C:\vc9
-          key: vc9-wdk71-v2
+          key: vc9-wdk71-v3
 
       - name: Cache ISOs
         if: steps.vc9cache.outputs.cache-hit != 'true'
@@ -79,7 +79,9 @@ jobs:
           if ($incCrt) { Copy-Item -Recurse -Force $incCrt.FullName C:\vc9\inc_crt }
           $libDirs = Get-ChildItem C:\wdkx -Recurse -Directory -Filter i386 -ErrorAction SilentlyContinue | ForEach-Object FullName
           Write-Host "=== i386 lib dirs:"; $libDirs
-          $libWin = $libDirs | Where-Object { $_ -match "win7|wnet|wlh|wxp" } | Select-Object -First 1
+          $libWin = $libDirs | Where-Object { $_ -match "libs_x86fre" -and $_ -match "\\lib\\win7\\" } | Select-Object -First 1
+          if (-not $libWin) { $libWin = $libDirs | Where-Object { $_ -match "win7|wnet|wlh" } | Select-Object -First 1 }
+          Write-Host "libWin choice: $libWin"; Get-ChildItem $libWin -Filter kernel32.lib | ForEach-Object FullName
           $libCrt = $libDirs | Where-Object { $_ -match "[Cc]rt" } | Select-Object -First 1
           if ($libWin) { Copy-Item -Recurse -Force $libWin C:\vc9\lib_win }
           if ($libCrt) { Copy-Item -Recurse -Force $libCrt C:\vc9\lib_crt }
