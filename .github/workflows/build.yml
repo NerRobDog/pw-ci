@@ -130,6 +130,7 @@ jobs:
         run: |
           $cml = "game/pw/branches/r1117/Src/CMakeLists.txt"
           $src = "game/pw/branches/r1117/Src"
+          (Get-Content $cml) -replace [regex]::Escape('include_directories( ${SRC_DIR}/Server/NetworkAIO )'), "include_directories( `${SRC_DIR}/Server/NetworkAIO )`ninclude_directories( `${SRC_DIR}/Server/Chat )" | Set-Content $cml
           $lines = Get-Content $cml
           $out = foreach ($l in $lines) {
             if ($l -match 'set\( ALL_SRCS \$\{ALL_SRCS\} \$\{SRC_DIR\}(/[^ ]+) \)') {
