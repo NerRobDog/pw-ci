@@ -38,24 +38,24 @@ jobs:
         run: |
           # GRMSDK_EN_DVD.iso = Windows SDK for Windows 7 and .NET 3.5 SP1 (contains VC 9.0 SP1 x86 compilers)
           $iso = "$env:TEMP\GRMSDK_EN_DVD.iso"
-          $urls = @(
-            "https://archive.org/download/GRMSDK_EN_DVD/GRMSDK_EN_DVD.iso",
-            "https://archive.org/download/grmsdk-en-dvd/GRMSDK_EN_DVD.iso"
-          )
-          $ok = $false
-          foreach ($u in $urls) {
-            try { Invoke-WebRequest -Uri $u -OutFile $iso -TimeoutSec 3000; $ok = $true; break } catch { Write-Host "miss: $u" }
-          }
-          if (-not $ok) { throw "SDK ISO download failed" }
+          Invoke-WebRequest -Uri "https://archive.org/download/grmsdkx-en-dvd/GRMSDK_EN_DVD.iso" -OutFile $iso -TimeoutSec 3000
           $mount = Mount-DiskImage -ImagePath $iso -PassThru
           $drive = ($mount | Get-Volume).DriveLetter
           Write-Host "mounted at $drive`:"
-          # Silent install: compilers + headers + libs only
+          Get-ChildItem "$drive`:\" | Select-Object -ExpandProperty Name | Write-Host
+          # Silent install (full SDK; trimming via ADDLOCAL is fragile on 7.0)
           Start-Process -Wait -FilePath "$drive`:\Setup\SDKSetup.exe" -ArgumentList "-q"
-          # Collect toolchain into C:\vc9 for caching
+          # Locate VC9 compiler wherever it landed and stage into C:\vc9
+          $cl = Get-ChildItem -Path "C:\Program Files (x86)","C:\Program Files" -Recurse -Filter cl.exe -ErrorAction SilentlyContinue | Where-Object { $_.FullName -notmatch "amd64|x64|ia64" } | Select-Object -First 1
+          if (-not $cl) { throw "cl.exe not found after SDK install" }
+          Write-Host "cl at: $($cl.FullName)"
           New-Item -ItemType Directory -Force -Path C:\vc9 | Out-Null
-          Copy-Item -Recurse -Force "C:\Program Files (x86)\Microsoft Visual Studio 9.0" C:\vc9\VS90
-          Copy-Item -Recurse -Force "C:\Program Files (x86)\Microsoft SDKs\Windows\v7.0" C:\vc9\SDK70
+          $vs = "C:\Program Files (x86)\Microsoft Visual Studio 9.0"
+          if (Test-Path $vs) { Copy-Item -Recurse -Force $vs C:\vc9\VS90 }
+          $sdk = "C:\Program Files (x86)\Microsoft SDKs\Windows\v7.0"
+          if (-not (Test-Path $sdk)) { $sdk = "C:\Program Files\Microsoft SDKs\Windows\v7.0" }
+          if (Test-Path $sdk) { Copy-Item -Recurse -Force $sdk C:\vc9\SDK70 }
+          Get-ChildItem C:\vc9 | Write-Host
           Dismount-DiskImage -ImagePath $iso
 
       - name: Install jom + portable CMake 3.16
