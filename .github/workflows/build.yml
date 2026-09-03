@@ -152,14 +152,15 @@ jobs:
           }
           Set-Content $cml $out2
           # стаб вместо вырезанного server_ip.h (секрет сообщества, не нужен для оффлайна)
-          $stub = @"
-#pragma once
-static const wchar_t* SERVER_IP_W_ARRAY[] = { L"127.0.0.1", L"127.0.0.1", L"127.0.0.1", L"127.0.0.1" };
-static const char*    SERVER_IP_ARRAY[]   = { "127.0.0.1", "127.0.0.1", "127.0.0.1", "127.0.0.1" };
-#define SYNCHRONIZER_PORT 34999
-"@
           $sip = "game/pw/branches/r1117/Src/PW_Game/server_ip.h"
-          if (-not (Test-Path $sip)) { Set-Content $sip $stub; Write-Host "stubbed server_ip.h" }
+          if (-not (Test-Path $sip)) {
+            $stub = "#pragma once`n" +
+              "static const wchar_t* SERVER_IP_W_ARRAY[] = { L`"127.0.0.1`", L`"127.0.0.1`", L`"127.0.0.1`", L`"127.0.0.1`" };`n" +
+              "static const char*    SERVER_IP_ARRAY[]   = { `"127.0.0.1`", `"127.0.0.1`", `"127.0.0.1`", `"127.0.0.1`" };`n" +
+              "#define SYNCHRONIZER_PORT 34999`n"
+            Set-Content $sip $stub
+            Write-Host "stubbed server_ip.h"
+          }
           Select-String -Path $cml -Pattern "ABSENT" | ForEach-Object Line
 
       - name: Locate mt.exe from runner Windows Kits
