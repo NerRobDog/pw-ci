@@ -106,6 +106,23 @@ jobs:
           Invoke-WebRequest https://github.com/Kitware/CMake/releases/download/v3.16.9/cmake-3.16.9-win64-x64.zip -OutFile cmake.zip
           Expand-Archive cmake.zip -DestinationPath C:\cmake316 -Force
 
+      - name: Patch CMakeLists (drop files absent from published tree)
+        shell: pwsh
+        run: |
+          $cml = "game/pw/branches/r1117/Src/CMakeLists.txt"
+          $src = "game/pw/branches/r1117/Src"
+          $lines = Get-Content $cml
+          $out = foreach ($l in $lines) {
+            if ($l -match 'set\( ALL_SRCS \$\{ALL_SRCS\} \$\{SRC_DIR\}(/[^ ]+) \)') {
+              $rel = $Matches[1]
+              $full = Join-Path $src $rel.TrimStart('/')
+              if (-not (Test-Path $full)) { "# ABSENT: $l"; continue }
+            }
+            $l
+          }
+          Set-Content $cml $out
+          Select-String -Path $cml -Pattern "ABSENT" | ForEach-Object Line
+
       - name: Locate mt.exe from runner Windows Kits
         shell: pwsh
         run: |
