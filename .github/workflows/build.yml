@@ -60,23 +60,30 @@ jobs:
             $f = "$d1`:\$msi"
             if (Test-Path $f) { Write-Host ">>> $f"; Start-Process -Wait msiexec -ArgumentList "/a `"$f`" /qn TARGETDIR=C:\sdkext\$([IO.Path]::GetFileNameWithoutExtension($msi))" }
           }
-          # --- VS2008 Express SP1: компилятор VC9 ---
+          # --- VS2008 Express SP1: компилятор VC9 (payload в self-extract exe) ---
           $m2 = Mount-DiskImage -ImagePath C:\iso\VS2008Express.iso -PassThru
           $d2 = ($m2 | Get-Volume).DriveLetter
-          Write-Host "=== Express ISO root:"; Get-ChildItem "$d2`:\" | ForEach-Object Name
-          Get-ChildItem "$d2`:\" -Recurse -Filter *.msi -ErrorAction SilentlyContinue | ForEach-Object FullName
-          Get-ChildItem "$d2`:\" -Recurse -Filter *.cab -ErrorAction SilentlyContinue | Select-Object -First 20 | ForEach-Object FullName
-          New-Item -ItemType Directory -Force -Path C:\vcext | Out-Null
-          Get-ChildItem "$d2`:\" -Recurse -Filter *.msi -ErrorAction SilentlyContinue |
-            Where-Object { $_.FullName -match "vc|VC" } |
+          Write-Host "=== VCExpress dir:"; Get-ChildItem "$d2`:\VCExpress" -Recurse -Depth 1 | Select-Object -First 40 | ForEach-Object FullName
+          New-Item -ItemType Directory -Force -Path C:\vcx | Out-Null
+          # вскрываем все exe из VCExpress (кроме WCU) семёркой
+          Get-ChildItem "$d2`:\VCExpress" -Recurse -Filter *.exe -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -notmatch "WCU" } |
             ForEach-Object {
-              Write-Host ">>> extracting $($_.FullName)"
+              Write-Host ">>> 7z x $($_.FullName)"
+              & 7z x -y "-oC:\vcx\$($_.BaseName)" $_.FullName | Select-Object -Last 2
+            }
+          Write-Host "=== extracted content:"; Get-ChildItem C:\vcx -Recurse -Depth 2 | Select-Object -First 60 | ForEach-Object FullName
+          # msi внутри вскрытых exe -> админ-распаковка
+          New-Item -ItemType Directory -Force -Path C:\vcext | Out-Null
+          Get-ChildItem C:\vcx -Recurse -Filter *.msi -ErrorAction SilentlyContinue |
+            ForEach-Object {
+              Write-Host ">>> msiexec /a $($_.FullName)"
               Start-Process -Wait msiexec -ArgumentList "/a `"$($_.FullName)`" /qn TARGETDIR=C:\vcext\$($_.BaseName)"
             }
           Write-Host "=== Express cl.exe:"
-          Get-ChildItem C:\vcext -Recurse -Filter cl.exe -ErrorAction SilentlyContinue | ForEach-Object FullName
+          Get-ChildItem C:\vcext,C:\vcx -Recurse -Filter cl.exe -ErrorAction SilentlyContinue | ForEach-Object FullName
           # --- staging ---
-          $cl = Get-ChildItem C:\vcext -Recurse -Filter cl.exe -ErrorAction SilentlyContinue | Where-Object { $_.FullName -notmatch "amd64|x64|ia64" } | Select-Object -First 1
+          $cl = Get-ChildItem C:\vcext,C:\vcx -Recurse -Filter cl.exe -ErrorAction SilentlyContinue | Where-Object { $_.FullName -notmatch "amd64|x64|ia64" } | Select-Object -First 1
           if (-not $cl) { throw "no VC9 cl.exe extracted from Express — inspect listing" }
           New-Item -ItemType Directory -Force -Path C:\vc9 | Out-Null
           $vcroot = Split-Path (Split-Path $cl.FullName)
