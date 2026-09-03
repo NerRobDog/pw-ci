@@ -111,7 +111,7 @@ jobs:
           if errorlevel 1 echo cl probe nonzero (ok)
           mkdir build
           cd build
-          cmake -G "NMake Makefiles JOM" "%GITHUB_WORKSPACE%\game\pw\branches\r1117\Src" -DCMAKE_BUILD_TYPE=Release
+          cmake -G "NMake Makefiles JOM" "%GITHUB_WORKSPACE%\game\pw\branches\r1117\Src" -DCMAKE_BUILD_TYPE=Release -DCMAKE_TRY_COMPILE_CONFIGURATION=Release "-DCMAKE_C_FLAGS_DEBUG=/Od" "-DCMAKE_CXX_FLAGS_DEBUG=/Od"
           jom /J 4
 
       - name: Upload artifact
