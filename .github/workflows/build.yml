@@ -106,10 +106,18 @@ jobs:
           Invoke-WebRequest https://github.com/Kitware/CMake/releases/download/v3.16.9/cmake-3.16.9-win64-x64.zip -OutFile cmake.zip
           Expand-Archive cmake.zip -DestinationPath C:\cmake316 -Force
 
+      - name: Locate mt.exe from runner Windows Kits
+        shell: pwsh
+        run: |
+          $mt = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" -Recurse -Filter mt.exe -ErrorAction SilentlyContinue | Where-Object { $_.FullName -match "\\x86\\" } | Select-Object -First 1
+          if (-not $mt) { throw "no mt.exe on runner" }
+          Write-Host "mt: $($mt.FullName)"
+          "MT_DIR=$($mt.DirectoryName)" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+
       - name: Configure and build (Release)
         shell: cmd
         run: |
-          set "PATH=C:\vc9\bin\x86;C:\vc9\bin;C:\jom;C:\cmake316\cmake-3.16.9-win64-x64\bin;%PATH%"
+          set "PATH=C:\vc9\bin\x86;C:\vc9\bin;C:\jom;C:\cmake316\cmake-3.16.9-win64-x64\bin;%MT_DIR%;%PATH%"
           set "INCLUDE=C:\vc9\inc_crt;C:\vc9\inc_api;C:\vc9\inc_atl"
           set "LIB=C:\vc9\lib_crt;C:\vc9\lib_win;C:\vc9\lib_atl"
           cl 2>&1 | findstr /i version
