@@ -1,0 +1,91 @@
+name: build-client
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "30 2 * * *"   # nightly 02:30 UTC
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 150
+    env:
+      SRC_REPO: Prime-World-Classic/prime-world-classic
+      R1117: pw/branches/r1117
+    steps:
+      - name: Checkout game sources (sparse, LFS)
+        uses: actions/checkout@v4
+        with:
+          repository: Prime-World-Classic/prime-world-classic
+          path: game
+          lfs: true
+          sparse-checkout: |
+            pw/branches/r1117/Src
+            pw/branches/r1117/Vendor
+            pw/branches/r1117/Tools
+          sparse-checkout-cone-mode: true
+
+      - name: Cache VC9 toolchain
+        id: vc9cache
+        uses: actions/cache@v4
+        with:
+          path: C:\vc9
+          key: vc9-sdk70-v1
+
+      - name: Install Windows SDK 7.0 (VC9 SP1 compilers)
+        if: steps.vc9cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          # GRMSDK_EN_DVD.iso = Windows SDK for Windows 7 and .NET 3.5 SP1 (contains VC 9.0 SP1 x86 compilers)
+          $iso = "$env:TEMP\GRMSDK_EN_DVD.iso"
+          $urls = @(
+            "https://archive.org/download/GRMSDK_EN_DVD/GRMSDK_EN_DVD.iso",
+            "https://archive.org/download/grmsdk-en-dvd/GRMSDK_EN_DVD.iso"
+          )
+          $ok = $false
+          foreach ($u in $urls) {
+            try { Invoke-WebRequest -Uri $u -OutFile $iso -TimeoutSec 3000; $ok = $true; break } catch { Write-Host "miss: $u" }
+          }
+          if (-not $ok) { throw "SDK ISO download failed" }
+          $mount = Mount-DiskImage -ImagePath $iso -PassThru
+          $drive = ($mount | Get-Volume).DriveLetter
+          Write-Host "mounted at $drive`:"
+          # Silent install: compilers + headers + libs only
+          Start-Process -Wait -FilePath "$drive`:\Setup\SDKSetup.exe" -ArgumentList "-q"
+          # Collect toolchain into C:\vc9 for caching
+          New-Item -ItemType Directory -Force -Path C:\vc9 | Out-Null
+          Copy-Item -Recurse -Force "C:\Program Files (x86)\Microsoft Visual Studio 9.0" C:\vc9\VS90
+          Copy-Item -Recurse -Force "C:\Program Files (x86)\Microsoft SDKs\Windows\v7.0" C:\vc9\SDK70
+          Dismount-DiskImage -ImagePath $iso
+
+      - name: Install jom + portable CMake 3.16
+        shell: pwsh
+        run: |
+          Invoke-WebRequest https://download.qt.io/official_releases/jom/jom.zip -OutFile jom.zip
+          Expand-Archive jom.zip -DestinationPath C:\jom -Force
+          Invoke-WebRequest https://github.com/Kitware/CMake/releases/download/v3.16.9/cmake-3.16.9-win64-x64.zip -OutFile cmake.zip
+          Expand-Archive cmake.zip -DestinationPath C:\cmake316 -Force
+
+      - name: Configure and build (Release)
+        shell: cmd
+        run: |
+          set "VS90=C:\vc9\VS90"
+          set "SDK=C:\vc9\SDK70"
+          set "PATH=%VS90%\VC\bin;%VS90%\Common7\IDE;C:\jom;C:\cmake316\cmake-3.16.9-win64-x64\bin;%PATH%"
+          set "INCLUDE=%VS90%\VC\include;%SDK%\Include"
+          set "LIB=%VS90%\VC\lib;%SDK%\Lib"
+          cl 2>&1 | findstr /i version
+          mkdir build
+          cd build
+          cmake -G "NMake Makefiles JOM" "%GITHUB_WORKSPACE%\game\pw\branches\r1117\Src" -DCMAKE_BUILD_TYPE=Release
+          jom /J 4
+
+      - name: Upload artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: PrimeWorld-Release
+          path: |
+            build/PrimeWorld.exe
+            build/*.dll
+          if-no-files-found: warn
