@@ -30,7 +30,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: C:\vc9
-          key: vc9-wdk71-v1
+          key: vc9-wdk71-v2
 
       - name: Cache ISOs
         if: steps.vc9cache.outputs.cache-hit != 'true'
@@ -72,7 +72,7 @@ jobs:
           if (-not $cl) { throw "no cl.exe in WDK extraction — see listings" }
           # staged layout: C:\vc9\bin (компилятор+вспом.), C:\vc9\inc..., C:\vc9\lib...
           New-Item -ItemType Directory -Force -Path C:\vc9 | Out-Null
-          Copy-Item -Recurse -Force (Split-Path $cl.FullName) C:\vc9\bin
+          Copy-Item -Recurse -Force (Split-Path (Split-Path $cl.FullName)) C:\vc9\bin
           $incApi = Get-ChildItem C:\wdkx -Recurse -Directory -Filter api | Where-Object { Test-Path (Join-Path $_.FullName "windows.h") } | Select-Object -First 1
           $incCrt = Get-ChildItem C:\wdkx -Recurse -Directory -Filter crt | Where-Object { Test-Path (Join-Path $_.FullName "stdio.h") } | Select-Object -First 1
           if ($incApi) { Copy-Item -Recurse -Force $incApi.FullName C:\vc9\inc_api }
@@ -102,7 +102,7 @@ jobs:
       - name: Configure and build (Release)
         shell: cmd
         run: |
-          set "PATH=C:\vc9\bin;C:\jom;C:\cmake316\cmake-3.16.9-win64-x64\bin;%PATH%"
+          set "PATH=C:\vc9\bin\x86;C:\vc9\bin;C:\jom;C:\cmake316\cmake-3.16.9-win64-x64\bin;%PATH%"
           set "INCLUDE=C:\vc9\inc_crt;C:\vc9\inc_api;C:\vc9\inc_atl"
           set "LIB=C:\vc9\lib_crt;C:\vc9\lib_win;C:\vc9\lib_atl"
           cl 2>&1 | findstr /i version
