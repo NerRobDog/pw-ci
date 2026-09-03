@@ -182,7 +182,8 @@ jobs:
               "#define SERVER_CLUSTER_PORT_BACK 35000`n" +
               "#define SERVER_CLUSTER_PORT_FRONT 35001`n" +
               "#define SYNCHRONIZER_PORT 34999`n" +
-              "static int usedServer = 0;`n" +
+              "extern int usedServer;`n" +
+              "#define SERVER_IP_W L`"127.0.0.1`"`n" +
               "#define SESSION_TOKEN `"offline`"`n" +
               "#define API_KEY `"offline`"`n"
             Set-Content $sip $stub
