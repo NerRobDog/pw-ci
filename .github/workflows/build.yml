@@ -188,6 +188,21 @@ jobs:
             Set-Content $sip $stub
             Write-Host "stubbed server_ip.h"
           }
+          # стабы Steamworks (редистрибуция SDK запрещена; клиенту оффлайн Steam не нужен)
+          $stdir = "game/pw/branches/r1117/Src/steam"
+          if (-not (Test-Path $stdir)) {
+            New-Item -ItemType Directory -Force -Path $stdir | Out-Null
+            $api = "#pragma once`n" +
+              "inline bool SteamAPI_Init() { return false; }`n" +
+              "inline void SteamAPI_Shutdown() {}`n" +
+              "inline void SteamAPI_RunCallbacks() {}`n" +
+              "inline bool SteamAPI_RestartAppIfNecessary(unsigned) { return false; }`n"
+            Set-Content "$stdir/steam_api.h" $api
+            foreach ($h in @("isteamuserstats.h","isteamremotestorage.h","isteammatchmaking.h","steam_gameserver.h")) {
+              Set-Content "$stdir/$h" "#pragma once`n"
+            }
+            Write-Host "stubbed steam headers"
+          }
           Select-String -Path $cml -Pattern "ABSENT" | ForEach-Object Line
           # фикс бага сообщества: пропущенная ; в ClientDispatchVisibilityHelper.cpp
           $cdvh = "game/pw/branches/r1117/Src/PF_GameLogic/ClientDispatchVisibilityHelper.cpp"
