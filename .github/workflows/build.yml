@@ -176,6 +176,11 @@ jobs:
           if (Test-Path $cdvh) {
             (Get-Content $cdvh) -replace 'EnableRender\(_visible\)$', 'EnableRender(_visible);' | Set-Content $cdvh
           }
+          # DBStats.h полагается на PCH для StringExecutor.h — добавим инклуд
+          $dbst = "game/pw/branches/r1117/Src/PF_GameLogic/DBStats.h"
+          if ((Test-Path $dbst) -and -not (Select-String -Path $dbst -Pattern "StringExecutor.h" -Quiet)) {
+            (Get-Content $dbst) -replace [regex]::Escape('#include "../Terrain/DBTerrain.h"'), "#include `"../Terrain/DBTerrain.h`"`n#include `"StringExecutor.h`"" | Set-Content $dbst
+          }
 
       - name: Locate mt.exe from runner Windows Kits
         shell: pwsh
