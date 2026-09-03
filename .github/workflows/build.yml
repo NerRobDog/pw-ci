@@ -30,7 +30,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: C:\vc9
-          key: vc9-sdk70-v3
+          key: vc9-wdk71-v1
 
       - name: Cache ISOs
         if: steps.vc9cache.outputs.cache-hit != 'true'
@@ -38,71 +38,58 @@ jobs:
         uses: actions/cache@v4
         with:
           path: C:\iso
-          key: isos-v2
+          key: iso-wdk71-v1
 
-      - name: Download SDK ISO
+      - name: Download WDK 7.1 ISO
         if: steps.vc9cache.outputs.cache-hit != 'true' && steps.isocache.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path C:\iso | Out-Null
-          Invoke-WebRequest -Uri "https://archive.org/download/grmsdkx-en-dvd/GRMSDK_EN_DVD.iso" -OutFile C:\iso\GRMSDK_EN_DVD.iso -TimeoutSec 3000
-          Invoke-WebRequest -Uri "https://archive.org/download/vs-2008-express-with-sp-1-esnx-1504732/VS2008ExpressWithSP1ESNx1504732.iso" -OutFile C:\iso\VS2008Express.iso -TimeoutSec 4000
+          Invoke-WebRequest -Uri "https://archive.org/download/grmwdk-en-7600-1/GRMWDK_EN_7600_1.ISO" -OutFile C:\iso\WDK71.iso -TimeoutSec 3000
 
-      - name: Extract VC9 toolchain from ISOs (msiexec /a)
+      - name: Extract VC9 toolchain from WDK ISO (lessmsi)
         if: steps.vc9cache.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
-          # --- SDK 7.1: Windows headers/libs (совместимы с VS2008) ---
-          $m1 = Mount-DiskImage -ImagePath C:\iso\GRMSDK_EN_DVD.iso -PassThru
-          $d1 = ($m1 | Get-Volume).DriveLetter
-          New-Item -ItemType Directory -Force -Path C:\sdkext | Out-Null
-          foreach ($msi in @("Setup\WinSDKBuild\WinSDKBuild_x86.msi","Setup\WinSDK\WinSDK_x86.msi","Setup\WinSDKInterop\WinSDKInterop_x86.msi","Setup\WinSDKWin32Tools\WinSDKWin32Tools_x86.msi")) {
-            $f = "$d1`:\$msi"
-            if (Test-Path $f) { Write-Host ">>> $f"; Start-Process -Wait msiexec -ArgumentList "/a `"$f`" /qn TARGETDIR=C:\sdkext\$([IO.Path]::GetFileNameWithoutExtension($msi))" }
-          }
-          # --- VS2008 Express SP1: компилятор VC9 (payload в self-extract exe) ---
-          $m2 = Mount-DiskImage -ImagePath C:\iso\VS2008Express.iso -PassThru
-          $d2 = ($m2 | Get-Volume).DriveLetter
-          Write-Host "=== VCExpress dir:"; Get-ChildItem "$d2`:\VCExpress" -Recurse -Depth 1 | Select-Object -First 40 | ForEach-Object FullName
-          New-Item -ItemType Directory -Force -Path C:\vcx | Out-Null
-          # вскрываем все exe из VCExpress (кроме WCU) семёркой
-          Get-ChildItem "$d2`:\VCExpress" -Recurse -Filter *.exe -ErrorAction SilentlyContinue |
-            Where-Object { $_.FullName -notmatch "WCU" } |
+          choco install lessmsi -y --no-progress | Select-Object -Last 1
+          $m = Mount-DiskImage -ImagePath C:\iso\WDK71.iso -PassThru
+          $d = ($m | Get-Volume).DriveLetter
+          Write-Host "=== WDK ISO root:"; Get-ChildItem "$d`:\" | ForEach-Object Name
+          Write-Host "=== msi list:"; Get-ChildItem "$d`:\" -Recurse -Filter *.msi -ErrorAction SilentlyContinue | ForEach-Object { "$($_.FullName) $([math]::Round($_.Length/1MB,1))MB" }
+          New-Item -ItemType Directory -Force -Path C:\wdkx | Out-Null
+          Get-ChildItem "$d`:\" -Recurse -Filter *.msi -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -match "vctools|headers|libs|build|kittools|crt" } |
             ForEach-Object {
-              Write-Host ">>> 7z x $($_.FullName)"
-              & 7z x -y "-oC:\vcx\$($_.BaseName)" $_.FullName | Select-Object -Last 2
+              Write-Host ">>> lessmsi x $($_.Name)"
+              & "C:\ProgramData\chocolatey\bin\lessmsi.exe" x $_.FullName "C:\wdkx\$($_.BaseName)\" | Select-Object -Last 1
             }
-          Write-Host "=== extracted content:"; Get-ChildItem C:\vcx -Recurse -Depth 2 | Select-Object -First 60 | ForEach-Object FullName
-          # msi внутри вскрытых exe -> админ-распаковка
-          New-Item -ItemType Directory -Force -Path C:\vcext | Out-Null
-          Get-ChildItem C:\vcx -Recurse -Filter *.msi -ErrorAction SilentlyContinue |
-            ForEach-Object {
-              Write-Host ">>> msiexec /a $($_.FullName)"
-              Start-Process -Wait msiexec -ArgumentList "/a `"$($_.FullName)`" /qn TARGETDIR=C:\vcext\$($_.BaseName)"
-            }
-          Write-Host "=== Ixpvc content:"; Get-ChildItem C:\vcx\Ixpvc | ForEach-Object { "$($_.Name) $($_.Length)" }
-          choco install lessmsi -y --no-progress | Select-Object -Last 2
-          & "C:\ProgramData\chocolatey\bin\lessmsi.exe" x "C:\vcx\Ixpvc\vs_setup.msi" "C:\vsx\"
-          Write-Host "=== lessmsi cl.exe:"
-          Get-ChildItem C:\vsx -Recurse -Filter cl.exe -ErrorAction SilentlyContinue | ForEach-Object FullName
-          # --- staging ---
-          $cl = Get-ChildItem C:\vsx -Recurse -Filter cl.exe -ErrorAction SilentlyContinue | Where-Object { $_.FullName -notmatch "amd64|x64|ia64" } | Select-Object -First 1
-          if (-not $cl) { throw "no VC9 cl.exe extracted from Express — inspect listing" }
+          Write-Host "=== cl.exe candidates:"
+          Get-ChildItem C:\wdkx -Recurse -Filter cl.exe -ErrorAction SilentlyContinue | ForEach-Object FullName
+          Write-Host "=== include dirs:"
+          Get-ChildItem C:\wdkx -Recurse -Directory -Include inc,crt,api -ErrorAction SilentlyContinue | Select-Object -First 15 | ForEach-Object FullName
+          $cl = Get-ChildItem C:\wdkx -Recurse -Filter cl.exe -ErrorAction SilentlyContinue | Where-Object { $_.FullName -match "\\x86\\" -and $_.FullName -notmatch "amd64|ia64" } | Select-Object -First 1
+          if (-not $cl) { $cl = Get-ChildItem C:\wdkx -Recurse -Filter cl.exe -ErrorAction SilentlyContinue | Select-Object -First 1 }
+          if (-not $cl) { throw "no cl.exe in WDK extraction — see listings" }
+          # staged layout: C:\vc9\bin (компилятор+вспом.), C:\vc9\inc..., C:\vc9\lib...
           New-Item -ItemType Directory -Force -Path C:\vc9 | Out-Null
-          $vcroot = Split-Path (Split-Path $cl.FullName)
-          Copy-Item -Recurse -Force $vcroot C:\vc9\VC
-          $vsroot = Split-Path $vcroot
-          if (Test-Path "$vsroot\Common7") { Copy-Item -Recurse -Force "$vsroot\Common7" C:\vc9\Common7 }
-          # msvcr90 runtime рядом с компилятором
-          Get-ChildItem "$vcroot\redist" -Recurse -Filter *.dll -ErrorAction SilentlyContinue | Where-Object { $_.FullName -match "VC90.CRT" -and $_.FullName -notmatch "amd64|ia64" } | ForEach-Object { Copy-Item $_.FullName C:\vc9\VC\bin\ }
-          Get-ChildItem C:\vc9\VC\bin | Select-Object -First 30 | ForEach-Object Name
-          Get-ChildItem C:\vc9\Common7\IDE -Filter mspdb* -ErrorAction SilentlyContinue | ForEach-Object Name
-          $sdkinc = Get-ChildItem C:\sdkext -Recurse -Directory -Filter Include | Where-Object { Test-Path (Join-Path $_.FullName "Windows.h") } | Select-Object -First 1
-          if (-not $sdkinc) { throw "no SDK Include with Windows.h" }
-          Copy-Item -Recurse -Force (Split-Path $sdkinc.FullName) C:\vc9\SDK
-          Write-Host "=== staged:"; Get-ChildItem C:\vc9\VC\bin\cl.exe; Get-ChildItem C:\vc9\SDK
-          Dismount-DiskImage -ImagePath C:\iso\GRMSDK_EN_DVD.iso
-          Dismount-DiskImage -ImagePath C:\iso\VS2008Express.iso
+          Copy-Item -Recurse -Force (Split-Path $cl.FullName) C:\vc9\bin
+          $incApi = Get-ChildItem C:\wdkx -Recurse -Directory -Filter api | Where-Object { Test-Path (Join-Path $_.FullName "windows.h") } | Select-Object -First 1
+          $incCrt = Get-ChildItem C:\wdkx -Recurse -Directory -Filter crt | Where-Object { Test-Path (Join-Path $_.FullName "stdio.h") } | Select-Object -First 1
+          if ($incApi) { Copy-Item -Recurse -Force $incApi.FullName C:\vc9\inc_api }
+          if ($incCrt) { Copy-Item -Recurse -Force $incCrt.FullName C:\vc9\inc_crt }
+          $libDirs = Get-ChildItem C:\wdkx -Recurse -Directory -Filter i386 -ErrorAction SilentlyContinue | ForEach-Object FullName
+          Write-Host "=== i386 lib dirs:"; $libDirs
+          $libWin = $libDirs | Where-Object { $_ -match "win7|wnet|wlh|wxp" } | Select-Object -First 1
+          $libCrt = $libDirs | Where-Object { $_ -match "[Cc]rt" } | Select-Object -First 1
+          if ($libWin) { Copy-Item -Recurse -Force $libWin C:\vc9\lib_win }
+          if ($libCrt) { Copy-Item -Recurse -Force $libCrt C:\vc9\lib_crt }
+          # ATL для WTL
+          $incAtl = Get-ChildItem C:\wdkx -Recurse -Directory -Filter atl71 -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($incAtl) { Copy-Item -Recurse -Force $incAtl.FullName C:\vc9\inc_atl }
+          $libAtl = Get-ChildItem C:\wdkx -Recurse -Directory -Filter atl -ErrorAction SilentlyContinue | Where-Object { $_.FullName -match "lib" } | Select-Object -First 1
+          if ($libAtl) { Copy-Item -Recurse -Force $libAtl.FullName C:\vc9\lib_atl }
+          Write-Host "=== staged:"; Get-ChildItem C:\vc9 | ForEach-Object Name; Get-ChildItem C:\vc9\bin | Select-Object -First 40 | ForEach-Object Name
+          Dismount-DiskImage -ImagePath C:\iso\WDK71.iso
 
       - name: Install jom + portable CMake 3.16
         shell: pwsh
@@ -115,9 +102,9 @@ jobs:
       - name: Configure and build (Release)
         shell: cmd
         run: |
-          set "PATH=C:\vc9\VC\bin;C:\vc9\Common7\IDE;C:\jom;C:\cmake316\cmake-3.16.9-win64-x64\bin;%PATH%"
-          set "INCLUDE=C:\vc9\VC\include;C:\vc9\SDK\Include"
-          set "LIB=C:\vc9\VC\lib;C:\vc9\SDK\Lib"
+          set "PATH=C:\vc9\bin;C:\jom;C:\cmake316\cmake-3.16.9-win64-x64\bin;%PATH%"
+          set "INCLUDE=C:\vc9\inc_crt;C:\vc9\inc_api;C:\vc9\inc_atl"
+          set "LIB=C:\vc9\lib_crt;C:\vc9\lib_win;C:\vc9\lib_atl"
           cl 2>&1 | findstr /i version
           if errorlevel 1 echo cl probe nonzero (ok)
           mkdir build
