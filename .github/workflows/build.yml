@@ -31,7 +31,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: C:\vc9
-          key: vc9-wdk71-v4
+          key: vc9-wdk71-v5
 
       - name: Cache ISOs
         if: steps.vc9cache.outputs.cache-hit != 'true'
@@ -39,7 +39,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: C:\iso
-          key: iso-wdk-express-v1
+          key: iso-wdk-express-v2
 
       - name: Download WDK 7.1 ISO
         if: steps.vc9cache.outputs.cache-hit != 'true' && steps.isocache.outputs.cache-hit != 'true'
@@ -58,6 +58,12 @@ jobs:
             catch { Write-Host "attempt $i failed: $($_.Exception.Message)"; Start-Sleep -Seconds (30*$i) }
           }
           if (-not $ok) { throw "Express ISO download failed after retries" }
+          $ok=$false
+          foreach ($i in 1..4) {
+            try { Invoke-WebRequest -Uri "https://archive.org/download/grmsdkx-en-dvd/GRMSDK_EN_DVD.iso" -OutFile C:\iso\GRMSDK.iso -TimeoutSec 3000; $ok=$true; break }
+            catch { Write-Host "attempt $i failed"; Start-Sleep -Seconds (30*$i) }
+          }
+          if (-not $ok) { throw "GRMSDK ISO download failed after retries" }
 
       - name: Extract VC9 toolchain from WDK ISO (lessmsi)
         if: steps.vc9cache.outputs.cache-hit != 'true'
@@ -113,9 +119,19 @@ jobs:
           Copy-Item -Recurse -Force $inc.FullName C:\vc9\inc_stl
           $vclib = Get-ChildItem C:\vsx -Recurse -Directory -Filter lib | Where-Object { Test-Path (Join-Path $_.FullName "msvcrt.lib") } | Select-Object -First 1
           if ($vclib) { Copy-Item -Recurse -Force $vclib.FullName C:\vc9\lib_vc }
+          # полный Win32 Include из SDK 7.1
+          $m3 = Mount-DiskImage -ImagePath C:\iso\GRMSDK.iso -PassThru
+          $d3 = ($m3 | Get-Volume).DriveLetter
+          & "C:\ProgramData\chocolatey\bin\lessmsi.exe" x "$d3`:\Setup\WinSDKBuild\WinSDKBuild_x86.msi" "C:\sdkb\" | Select-Object -Last 1
+          & "C:\ProgramData\chocolatey\bin\lessmsi.exe" x "$d3`:\Setup\WinSDKInterop\WinSDKInterop_x86.msi" "C:\sdki\" | Select-Object -Last 1
+          $sdkinc2 = Get-ChildItem C:\sdkb,C:\sdki -Recurse -Directory -Filter Include -ErrorAction SilentlyContinue | Where-Object { Test-Path (Join-Path $_.FullName "TlHelp32.h") } | Select-Object -First 1
+          if (-not $sdkinc2) { $sdkinc2 = Get-ChildItem C:\sdkb,C:\sdki -Recurse -Directory -Filter Include -ErrorAction SilentlyContinue | Select-Object -First 1 }
+          if ($sdkinc2) { Copy-Item -Recurse -Force $sdkinc2.FullName C:\vc9\inc_sdk; Write-Host "inc_sdk from: $($sdkinc2.FullName)" }
+          Get-ChildItem C:\vc9\inc_sdk -Filter *elp32* -ErrorAction SilentlyContinue | ForEach-Object Name
           Write-Host "=== staged:"; Get-ChildItem C:\vc9 | ForEach-Object Name; Get-ChildItem C:\vc9\bin | Select-Object -First 40 | ForEach-Object Name
           Dismount-DiskImage -ImagePath C:\iso\WDK71.iso
           Dismount-DiskImage -ImagePath C:\iso\VS2008Express.iso
+          Dismount-DiskImage -ImagePath C:\iso\GRMSDK.iso
 
       - name: Install jom + portable CMake 3.16
         shell: pwsh
@@ -196,7 +212,7 @@ jobs:
         shell: cmd
         run: |
           set "PATH=C:\vc9\bin\x86;C:\vc9\bin;C:\jom;C:\cmake316\cmake-3.16.9-win64-x64\bin;%MT_DIR%;%PATH%"
-          set "INCLUDE=C:\vc9\inc_stl;C:\vc9\inc_crt;C:\vc9\inc_api;C:\vc9\inc_atl"
+          set "INCLUDE=C:\vc9\inc_stl;C:\vc9\inc_crt;C:\vc9\inc_api;C:\vc9\inc_sdk;C:\vc9\inc_atl"
           set "LIB=C:\vc9\lib_vc;C:\vc9\lib_crt;C:\vc9\lib_win;C:\vc9\lib_atl"
           cl 2>&1 | findstr /i version
           if errorlevel 1 echo cl probe nonzero (ok)
