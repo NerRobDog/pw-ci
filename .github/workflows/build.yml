@@ -120,7 +120,17 @@ jobs:
             }
             $l
           }
-          Set-Content $cml $out
+          # то же для vendor-либ: simple_add_library( [optimized|debug] ${VENDOR}/path )
+          $vendor = "game/pw/branches/r1117/Vendor"
+          $out2 = foreach ($l in $out) {
+            if ($l -match 'simple_add_library\(\s*(optimized\s+|debug\s+)?\$\{VENDOR\}(/[^ )]+)\s*\)') {
+              $rel = $Matches[2]
+              $full = Join-Path $vendor ($rel.TrimStart('/') + ".lib")
+              if (-not (Test-Path $full)) { "# ABSENTLIB: $l"; continue }
+            }
+            $l
+          }
+          Set-Content $cml $out2
           Select-String -Path $cml -Pattern "ABSENT" | ForEach-Object Line
 
       - name: Locate mt.exe from runner Windows Kits
