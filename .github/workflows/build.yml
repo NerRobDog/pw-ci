@@ -23,6 +23,7 @@ jobs:
             pw/branches/r1117/Src
             pw/branches/r1117/Vendor
             pw/branches/r1117/Tools
+            pw/branches/r1117/Data/GameLogic
           sparse-checkout-cone-mode: true
 
       - name: Cache VC9 toolchain
