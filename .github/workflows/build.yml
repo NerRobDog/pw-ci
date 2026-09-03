@@ -165,7 +165,8 @@ jobs:
               "#define LOGIN_PORT `"36615`"`n" +
               "#define SERVER_CLUSTER_PORT_BACK 35000`n" +
               "#define SERVER_CLUSTER_PORT_FRONT 35001`n" +
-              "#define SYNCHRONIZER_PORT 34999`n"
+              "#define SYNCHRONIZER_PORT 34999`n" +
+              "static int usedServer = 0;`n"
             Set-Content $sip $stub
             Write-Host "stubbed server_ip.h"
           }
