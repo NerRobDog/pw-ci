@@ -45,7 +45,12 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path C:\iso | Out-Null
-          Invoke-WebRequest -Uri "https://archive.org/download/grmwdk-en-7600-1/GRMWDK_EN_7600_1.ISO" -OutFile C:\iso\WDK71.iso -TimeoutSec 3000
+          $ok=$false
+          foreach ($i in 1..4) {
+            try { Invoke-WebRequest -Uri "https://archive.org/download/grmwdk-en-7600-1/GRMWDK_EN_7600_1.ISO" -OutFile C:\iso\WDK71.iso -TimeoutSec 3000; $ok=$true; break }
+            catch { Write-Host "attempt $i failed: $($_.Exception.Message)"; Start-Sleep -Seconds (30*$i) }
+          }
+          if (-not $ok) { throw "WDK ISO download failed after retries" }
 
       - name: Extract VC9 toolchain from WDK ISO (lessmsi)
         if: steps.vc9cache.outputs.cache-hit != 'true'
