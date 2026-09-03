@@ -171,6 +171,11 @@ jobs:
             Write-Host "stubbed server_ip.h"
           }
           Select-String -Path $cml -Pattern "ABSENT" | ForEach-Object Line
+          # фикс бага сообщества: пропущенная ; в ClientDispatchVisibilityHelper.cpp
+          $cdvh = "game/pw/branches/r1117/Src/PF_GameLogic/ClientDispatchVisibilityHelper.cpp"
+          if (Test-Path $cdvh) {
+            (Get-Content $cdvh) -replace 'EnableRender\(_visible\)$', 'EnableRender(_visible);' | Set-Content $cdvh
+          }
 
       - name: Locate mt.exe from runner Windows Kits
         shell: pwsh
