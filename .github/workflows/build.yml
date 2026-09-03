@@ -30,7 +30,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: C:\vc9
-          key: vc9-wdk71-v3
+          key: vc9-wdk71-v4
 
       - name: Cache ISOs
         if: steps.vc9cache.outputs.cache-hit != 'true'
@@ -38,7 +38,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: C:\iso
-          key: iso-wdk71-v1
+          key: iso-wdk-express-v1
 
       - name: Download WDK 7.1 ISO
         if: steps.vc9cache.outputs.cache-hit != 'true' && steps.isocache.outputs.cache-hit != 'true'
@@ -51,6 +51,12 @@ jobs:
             catch { Write-Host "attempt $i failed: $($_.Exception.Message)"; Start-Sleep -Seconds (30*$i) }
           }
           if (-not $ok) { throw "WDK ISO download failed after retries" }
+          $ok=$false
+          foreach ($i in 1..4) {
+            try { Invoke-WebRequest -Uri "https://archive.org/download/vs-2008-express-with-sp-1-esnx-1504732/VS2008ExpressWithSP1ESNx1504732.iso" -OutFile C:\iso\VS2008Express.iso -TimeoutSec 4000; $ok=$true; break }
+            catch { Write-Host "attempt $i failed: $($_.Exception.Message)"; Start-Sleep -Seconds (30*$i) }
+          }
+          if (-not $ok) { throw "Express ISO download failed after retries" }
 
       - name: Extract VC9 toolchain from WDK ISO (lessmsi)
         if: steps.vc9cache.outputs.cache-hit != 'true'
@@ -95,8 +101,20 @@ jobs:
           if ($incAtl) { Copy-Item -Recurse -Force $incAtl.FullName C:\vc9\inc_atl }
           $libAtl = Get-ChildItem C:\wdkx -Recurse -Directory -Filter atl -ErrorAction SilentlyContinue | Where-Object { $_.FullName -match "lib" } | Select-Object -First 1
           if ($libAtl) { Copy-Item -Recurse -Force $libAtl.FullName C:\vc9\lib_atl }
+          # --- VC9 STL + sal.h из VS2008 Express ---
+          $m2 = Mount-DiskImage -ImagePath C:\iso\VS2008Express.iso -PassThru
+          $d2 = ($m2 | Get-Volume).DriveLetter
+          New-Item -ItemType Directory -Force -Path C:\vcx | Out-Null
+          & 7z x -y "-oC:\vcx\Ixpvc" "$d2`:\VCExpress\Ixpvc.exe" | Select-Object -Last 1
+          & "C:\ProgramData\chocolatey\bin\lessmsi.exe" x "C:\vcx\Ixpvc\vs_setup.msi" "C:\vsx\" | Select-Object -Last 1
+          $inc = Get-ChildItem C:\vsx -Recurse -Directory -Filter include | Where-Object { Test-Path (Join-Path $_.FullName "algorithm") } | Select-Object -First 1
+          if (-not $inc) { throw "no VC include (algorithm) in Express extraction" }
+          Copy-Item -Recurse -Force $inc.FullName C:\vc9\inc_stl
+          $vclib = Get-ChildItem C:\vsx -Recurse -Directory -Filter lib | Where-Object { Test-Path (Join-Path $_.FullName "msvcrt.lib") } | Select-Object -First 1
+          if ($vclib) { Copy-Item -Recurse -Force $vclib.FullName C:\vc9\lib_vc }
           Write-Host "=== staged:"; Get-ChildItem C:\vc9 | ForEach-Object Name; Get-ChildItem C:\vc9\bin | Select-Object -First 40 | ForEach-Object Name
           Dismount-DiskImage -ImagePath C:\iso\WDK71.iso
+          Dismount-DiskImage -ImagePath C:\iso\VS2008Express.iso
 
       - name: Install jom + portable CMake 3.16
         shell: pwsh
@@ -145,8 +163,8 @@ jobs:
         shell: cmd
         run: |
           set "PATH=C:\vc9\bin\x86;C:\vc9\bin;C:\jom;C:\cmake316\cmake-3.16.9-win64-x64\bin;%MT_DIR%;%PATH%"
-          set "INCLUDE=C:\vc9\inc_crt;C:\vc9\inc_api;C:\vc9\inc_atl"
-          set "LIB=C:\vc9\lib_crt;C:\vc9\lib_win;C:\vc9\lib_atl"
+          set "INCLUDE=C:\vc9\inc_stl;C:\vc9\inc_crt;C:\vc9\inc_api;C:\vc9\inc_atl"
+          set "LIB=C:\vc9\lib_vc;C:\vc9\lib_crt;C:\vc9\lib_win;C:\vc9\lib_atl"
           cl 2>&1 | findstr /i version
           if errorlevel 1 echo cl probe nonzero (ok)
           mkdir build
