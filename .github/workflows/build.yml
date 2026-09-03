@@ -196,7 +196,10 @@ jobs:
               "inline bool SteamAPI_Init() { return false; }`n" +
               "inline void SteamAPI_Shutdown() {}`n" +
               "inline void SteamAPI_RunCallbacks() {}`n" +
-              "inline bool SteamAPI_RestartAppIfNecessary(unsigned) { return false; }`n"
+              "inline bool SteamAPI_RestartAppIfNecessary(unsigned) { return false; }`n" +
+              "enum ENotificationPosition { k_EPositionTopLeft, k_EPositionTopRight, k_EPositionBottomLeft, k_EPositionBottomRight };`n" +
+              "struct ISteamUtilsStub { void SetOverlayNotificationPosition(ENotificationPosition) {} };`n" +
+              "inline ISteamUtilsStub* SteamUtils() { static ISteamUtilsStub s; return &s; }`n"
             Set-Content "$stdir/steam_api.h" $api
             foreach ($h in @("isteamuserstats.h","isteamremotestorage.h","isteammatchmaking.h","steam_gameserver.h")) {
               Set-Content "$stdir/$h" "#pragma once`n"
