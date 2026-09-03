@@ -158,6 +158,13 @@ jobs:
             $stub = "#pragma once`n" +
               "static const wchar_t* SERVER_IP_W_ARRAY[] = { L`"127.0.0.1`", L`"127.0.0.1`", L`"127.0.0.1`", L`"127.0.0.1`" };`n" +
               "static const char*    SERVER_IP_ARRAY[]   = { `"127.0.0.1`", `"127.0.0.1`", `"127.0.0.1`", `"127.0.0.1`" };`n" +
+              "#define SERVER_IP `"127.0.0.1`"`n" +
+              "#define MIRROR_SERVER_IP `"127.0.0.1`"`n" +
+              "#define SERVER_PROXY_IP `"127.0.0.1`"`n" +
+              "#define SERVER_PORT `"34999`"`n" +
+              "#define LOGIN_PORT `"36615`"`n" +
+              "#define SERVER_CLUSTER_PORT_BACK 35000`n" +
+              "#define SERVER_CLUSTER_PORT_FRONT 35001`n" +
               "#define SYNCHRONIZER_PORT 34999`n"
             Set-Content $sip $stub
             Write-Host "stubbed server_ip.h"
