@@ -80,10 +80,18 @@ jobs:
               Write-Host ">>> msiexec /a $($_.FullName)"
               Start-Process -Wait msiexec -ArgumentList "/a `"$($_.FullName)`" /qn TARGETDIR=C:\vcext\$($_.BaseName)"
             }
+          Write-Host "=== Ixpvc content:"; Get-ChildItem C:\vcx\Ixpvc | ForEach-Object { "$($_.Name) $($_.Length)" }
+          Write-Host "=== vs_setup.msi /a with log:"
+          Start-Process -Wait msiexec -ArgumentList "/a `"C:\vcx\Ixpvc\vs_setup.msi`" /qn TARGETDIR=C:\vsadmin /l*v C:\msilog.txt"
+          Write-Host "--- msilog tail:"; Get-Content C:\msilog.txt -Tail 25
+          Write-Host "=== vsadmin tree:"; Get-ChildItem C:\vsadmin -Recurse -Depth 3 -ErrorAction SilentlyContinue | Select-Object -First 50 | ForEach-Object FullName
+          Write-Host "=== cab direct 7z listing (first cab):"
+          $cab = Get-ChildItem C:\vcx\Ixpvc -Filter *.cab | Select-Object -First 1
+          if ($cab) { & 7z l $cab.FullName | Select-String -Pattern "cl\.exe|c1\.dll|include" | Select-Object -First 10 }
           Write-Host "=== Express cl.exe:"
-          Get-ChildItem C:\vcext,C:\vcx -Recurse -Filter cl.exe -ErrorAction SilentlyContinue | ForEach-Object FullName
+          Get-ChildItem C:\vcext,C:\vcx,C:\vsadmin -Recurse -Filter cl.exe -ErrorAction SilentlyContinue | ForEach-Object FullName
           # --- staging ---
-          $cl = Get-ChildItem C:\vcext,C:\vcx -Recurse -Filter cl.exe -ErrorAction SilentlyContinue | Where-Object { $_.FullName -notmatch "amd64|x64|ia64" } | Select-Object -First 1
+          $cl = Get-ChildItem C:\vcext,C:\vcx,C:\vsadmin -Recurse -Filter cl.exe -ErrorAction SilentlyContinue | Where-Object { $_.FullName -notmatch "amd64|x64|ia64" } | Select-Object -First 1
           if (-not $cl) { throw "no VC9 cl.exe extracted from Express — inspect listing" }
           New-Item -ItemType Directory -Force -Path C:\vc9 | Out-Null
           $vcroot = Split-Path (Split-Path $cl.FullName)
