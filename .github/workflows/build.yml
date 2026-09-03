@@ -111,7 +111,9 @@ jobs:
           if errorlevel 1 echo cl probe nonzero (ok)
           mkdir build
           cd build
+          where mt.exe rc.exe cvtres.exe 2>nul
           cmake -G "NMake Makefiles JOM" "%GITHUB_WORKSPACE%\game\pw\branches\r1117\Src" -DCMAKE_BUILD_TYPE=Release -DCMAKE_TRY_COMPILE_CONFIGURATION=Release "-DCMAKE_C_FLAGS_DEBUG=/Od" "-DCMAKE_CXX_FLAGS_DEBUG=/Od"
+          if errorlevel 1 ( type CMakeFiles\CMakeError.log & exit /b 2 )
           jom /J 4
 
       - name: Upload artifact
