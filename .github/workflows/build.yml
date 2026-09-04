@@ -207,6 +207,9 @@ jobs:
             }
             Write-Host "stubbed steam headers"
           }
+          # точечные фиксы инклудов (файлы лежат уровнем выше)
+          $tb = "game/pw/branches/r1117/Src/System/Node/TextBuffer.h"
+          if (Test-Path $tb) { (Get-Content $tb) -replace '#include "StrUtils.h"', '#include "../StrUtils.h"' | Set-Content $tb }
           Select-String -Path $cml -Pattern "ABSENT" | ForEach-Object Line
           # фикс бага сообщества: пропущенная ; в ClientDispatchVisibilityHelper.cpp
           $cdvh = "game/pw/branches/r1117/Src/PF_GameLogic/ClientDispatchVisibilityHelper.cpp"
