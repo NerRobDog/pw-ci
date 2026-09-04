@@ -210,6 +210,10 @@ jobs:
           # точечные фиксы инклудов (файлы лежат уровнем выше)
           $tb = "game/pw/branches/r1117/Src/System/Node/TextBuffer.h"
           if (Test-Path $tb) { (Get-Content $tb) -replace '#include "StrUtils.h"', '#include "../StrUtils.h"' | Set-Content $tb }
+          $fu = "game/pw/branches/r1117/Src/System/FileSystem/FileUnpile.cpp"
+          if (Test-Path $fu) {
+            (Get-Content $fu) -replace '#include "systemStdAfx.h"', '#include "../systemStdAfx.h"' -replace '#include "SystemLog.h"', '#include "../SystemLog.h"' | Set-Content $fu
+          }
           Select-String -Path $cml -Pattern "ABSENT" | ForEach-Object Line
           # фикс бага сообщества: пропущенная ; в ClientDispatchVisibilityHelper.cpp
           $cdvh = "game/pw/branches/r1117/Src/PF_GameLogic/ClientDispatchVisibilityHelper.cpp"
