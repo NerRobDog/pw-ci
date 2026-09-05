@@ -2,6 +2,11 @@ name: build-client
 
 on:
   workflow_dispatch:
+    inputs:
+      extra_defs:
+        description: "Extra compile definitions, e.g. -D_SHIPPING -DUSE_DEVELOPER_COMMANDS"
+        required: false
+        default: ""
   schedule:
     - cron: "30 2 * * *"   # nightly 02:30 UTC
 
@@ -276,7 +281,7 @@ jobs:
           mkdir build
           cd build
           where mt.exe rc.exe cvtres.exe 2>nul
-          cmake -G "NMake Makefiles JOM" "%GITHUB_WORKSPACE%\game\pw\branches\r1117\Src" -DCMAKE_BUILD_TYPE=Release -DCMAKE_TRY_COMPILE_CONFIGURATION=Release "-DCMAKE_C_FLAGS_DEBUG=/Od" "-DCMAKE_CXX_FLAGS_DEBUG=/Od" "-DCMAKE_C_FLAGS_RELEASE=/MD /O2 /Ob2 /DNDEBUG /Z7" "-DCMAKE_CXX_FLAGS_RELEASE=/MD /O2 /Ob2 /DNDEBUG /Z7" "-DCMAKE_EXE_LINKER_FLAGS_RELEASE=/DEBUG /MAP /OPT:REF /OPT:ICF /INCREMENTAL:NO /LARGEADDRESSAWARE"
+          cmake -G "NMake Makefiles JOM" "%GITHUB_WORKSPACE%\game\pw\branches\r1117\Src" -DCMAKE_BUILD_TYPE=Release -DCMAKE_TRY_COMPILE_CONFIGURATION=Release "-DCMAKE_C_FLAGS_DEBUG=/Od" "-DCMAKE_CXX_FLAGS_DEBUG=/Od" "-DCMAKE_C_FLAGS_RELEASE=/MD /O2 /Ob2 /DNDEBUG /Z7" "-DCMAKE_CXX_FLAGS_RELEASE=/MD /O2 /Ob2 /DNDEBUG /Z7" "-DCMAKE_EXE_LINKER_FLAGS_RELEASE=/DEBUG /MAP /OPT:REF /OPT:ICF /INCREMENTAL:NO /LARGEADDRESSAWARE" "-DPWCI_EXTRA_DEFS=${{ github.event.inputs.extra_defs }}"
           if errorlevel 1 ( type CMakeFiles\CMakeError.log & exit /b 2 )
           jom /J 4
 

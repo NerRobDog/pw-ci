@@ -61,3 +61,10 @@ set( ALL_SRCS ${_pwci_sorted} ${_pwci_rest} )
 list( LENGTH _pwci_sorted _n1 )
 list( LENGTH _pwci_rest _n2 )
 message( STATUS "pwci: init-order sorted ${_n1} sources, ${_n2} unmatched appended last" )
+
+# --- optional extra definitions from workflow_dispatch (space separated, e.g. "-D_SHIPPING -DFOO") ---
+if( PWCI_EXTRA_DEFS )
+  separate_arguments( _pwci_defs WINDOWS_COMMAND "${PWCI_EXTRA_DEFS}" )
+  add_definitions( ${_pwci_defs} )
+  message( STATUS "pwci: extra defs: ${_pwci_defs}" )
+endif()
