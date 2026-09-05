@@ -264,7 +264,7 @@ jobs:
           mkdir build
           cd build
           where mt.exe rc.exe cvtres.exe 2>nul
-          cmake -G "NMake Makefiles JOM" "%GITHUB_WORKSPACE%\game\pw\branches\r1117\Src" -DCMAKE_BUILD_TYPE=Release -DCMAKE_TRY_COMPILE_CONFIGURATION=Release "-DCMAKE_C_FLAGS_DEBUG=/Od" "-DCMAKE_CXX_FLAGS_DEBUG=/Od"
+          cmake -G "NMake Makefiles JOM" "%GITHUB_WORKSPACE%\game\pw\branches\r1117\Src" -DCMAKE_BUILD_TYPE=Release -DCMAKE_TRY_COMPILE_CONFIGURATION=Release "-DCMAKE_C_FLAGS_DEBUG=/Od" "-DCMAKE_CXX_FLAGS_DEBUG=/Od" "-DCMAKE_C_FLAGS_RELEASE=/MD /O2 /Ob2 /DNDEBUG /Z7" "-DCMAKE_CXX_FLAGS_RELEASE=/MD /O2 /Ob2 /DNDEBUG /Z7" "-DCMAKE_EXE_LINKER_FLAGS_RELEASE=/DEBUG /MAP /OPT:REF /OPT:ICF /INCREMENTAL:NO"
           if errorlevel 1 ( type CMakeFiles\CMakeError.log & exit /b 2 )
           jom /J 4
 
@@ -275,5 +275,7 @@ jobs:
           name: PrimeWorld-Release
           path: |
             build/PrimeWorld.exe
+            build/PrimeWorld.pdb
+            build/PrimeWorld.map
             build/*.dll
           if-no-files-found: warn
