@@ -243,6 +243,18 @@ jobs:
           if ((Test-Path $dbst) -and -not (Select-String -Path $dbst -Pattern "StringExecutor.h" -Quiet)) {
             (Get-Content $dbst) -replace [regex]::Escape('#include "../Terrain/DBTerrain.h"'), "#include `"../Terrain/DBTerrain.h`"`n#include `"StringExecutor.h`"" | Set-Content $dbst
           }
+          # Оффлайн-запуск (Nival-флоу): сообщество закомментировало local_game и вставило
+          # обязательный лаунчер-протокол между созданием контекста и context->Start().
+          # Возвращаем переменную и обходим блок лаунчера, когда local_game/replay.
+          $gcpp = "game/pw/branches/r1117/Src/PW_Client/Game.cpp"
+          if ((Test-Path $gcpp) -and -not (Select-String -Path $gcpp -Pattern "pwci-local" -Quiet)) {
+            $g = [System.IO.File]::ReadAllText((Resolve-Path $gcpp))
+            $g = $g.Replace('//REGISTER_DEV_VAR( "local_game", s_localGame, STORAGE_NONE);', 'REGISTER_DEV_VAR( "local_game", s_localGame, STORAGE_NONE);')
+            $g = $g.Replace('  std::string linuxRun = CmdLineLite::Instance().GetStringKey( "linux", "" );', "  if ( s_localGame || isReplay ) { context->Start(); } else { // pwci-local`n  std::string linuxRun = CmdLineLite::Instance().GetStringKey( `"linux`", `"`" );")
+            $g = $g.Replace('  mainVars.initContext = true;', "  } // pwci-local`n  mainVars.initContext = true;")
+            [System.IO.File]::WriteAllText((Resolve-Path $gcpp), $g)
+            Select-String -Path $gcpp -Pattern "pwci-local|local_game" | ForEach-Object { "GAMECPP: " + $_.Line }
+          }
 
       - name: Locate mt.exe from runner Windows Kits
         shell: pwsh
