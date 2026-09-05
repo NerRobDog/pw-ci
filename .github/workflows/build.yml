@@ -246,7 +246,8 @@ jobs:
         run: |
           set "PATH=C:\vc9\bin\x86;C:\vc9\bin;C:\jom;C:\cmake316\cmake-3.16.9-win64-x64\bin;%MT_DIR%;%PATH%"
           set "INCLUDE=C:\vc9\inc_stl;C:\vc9\inc_crt;C:\vc9\inc_api;C:\vc9\inc_sdk;C:\vc9\inc_atl"
-          set "LIB=C:\vc9\lib_vc;C:\vc9\lib_crt;C:\vc9\lib_win;C:\vc9\lib_sdk;C:\vc9\lib_atl"
+          dir C:\vc9\lib_atl /s /b | findstr /i atls
+          set "LIB=C:\vc9\lib_vc;C:\vc9\lib_crt;C:\vc9\lib_win;C:\vc9\lib_sdk;C:\vc9\lib_atl;C:\vc9\lib_atl\i386"
           cl 2>&1 | findstr /i version
           if errorlevel 1 echo cl probe nonzero (ok)
           mkdir build
