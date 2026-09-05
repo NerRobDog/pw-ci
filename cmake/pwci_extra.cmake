@@ -27,12 +27,13 @@ set( ALL_SRCS ${ALL_SRCS}
 # Vendor/libcurl/lib/Release/libcurl.lib is a static build (exports _curl_*, no __imp__),
 # same as Nival's vcproj which defined CURL_STATICLIB. Static curl pulls winsock + ldap.
 add_definitions( -DCURL_STATICLIB )
-include_directories( ${SRC_DIR}/Server/Monitoring ${SRC_DIR}/Game/PF/Server )
+include_directories( ${SRC_DIR}/Server/Monitoring ${SRC_DIR}/Game/PF/Server ${VENDOR}/tinyxml/src )
 
 # --- vendor / tool libs ---
 simple_add_library( wbemuuid )
 simple_add_library( ws2_32 )
 simple_add_library( wldap32 )
+simple_add_library( ${VENDOR}/tinyxml/Release/tinyxml )
 simple_add_library( ${VENDOR}/JsonCpp/lib/Release/JsonCpp )
 simple_add_library( ${VENDOR}/libcurl/lib/Release/libcurl )
 simple_add_library( ${SRC_DIR}/../Tools/Censor/lib/Release/CensorDll )
