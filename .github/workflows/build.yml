@@ -225,6 +225,8 @@ jobs:
             (Get-Content $tl) -replace 'PEB_LDR_DATA', 'PW_PEB_LDR_DATA' -replace 'RTL_USER_PROCESS_PARAMETERS', 'PW_RTL_USER_PROCESS_PARAMETERS' | Set-Content $tl
           }
           # наши стабы + cmake-сниппет с довключением вырезанных исходников и либ
+          $sd = "$src/Game/PF/Server/Statistic/StatClientDiskDispatcher.cpp"
+          if (Test-Path $sd) { (Get-Content $sd) -replace '#include "StatClientDiskDispatcher.h"', "#include `"StatClientDiskDispatcher.h`"`n#include `"System/FileSystem/FilePath.h`"" | Set-Content $sd }
           Copy-Item stubs/pwci_stubs.cpp "$src/pwci_stubs.cpp"
           $snip = (Resolve-Path cmake/pwci_extra.cmake).Path -replace '\\','/'
           (Get-Content $cml) -replace [regex]::Escape('#print_list( ALL_SRCS )'), "include( `"$snip`" )`n#print_list( ALL_SRCS )" | Set-Content $cml
