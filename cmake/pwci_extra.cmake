@@ -37,3 +37,27 @@ simple_add_library( ${VENDOR}/tinyxml/Release/tinyxml )
 simple_add_library( ${VENDOR}/JsonCpp/lib/Release/JsonCpp )
 simple_add_library( ${VENDOR}/libcurl/lib/Release/libcurl )
 simple_add_library( ${SRC_DIR}/../Tools/Censor/lib/Release/CensorDll )
+
+# --- static-init order ---
+# MSVC runs global constructors in link (object) order. The DLL build initialised
+# System.dll first and PW_Client.dll last; the monolithic GLOB order is alphabetical
+# (Client/... before System/...), so constructors in Client/Core ran before the
+# System globals they touch existed -> zeroed CRITICAL_SECTION deadlock at startup
+# ("RtlpWaitForCriticalSection ... blocked by 0000"). Re-emit ALL_SRCS in DLL
+# dependency order from PF.sln; unmatched dirs (Game/PF/Server, Server/*, Vendor, stubs) go last.
+set( PWCI_INIT_ORDER
+  MemoryLib System libdb Sound NivalInput Render Terrain Scripts Scene UI
+  Server/RPC Network Core Client PF_Core PF_GameLogic
+  Server/NetworkAIO Game/PF/Client PF_Minigames PW_Client PW_Game )
+set( _pwci_rest ${ALL_SRCS} )
+set( _pwci_sorted )
+foreach( _d ${PWCI_INIT_ORDER} )
+  set( _m ${_pwci_rest} )
+  list( FILTER _m INCLUDE REGEX "/Src/${_d}/" )
+  list( APPEND _pwci_sorted ${_m} )
+  list( FILTER _pwci_rest EXCLUDE REGEX "/Src/${_d}/" )
+endforeach()
+set( ALL_SRCS ${_pwci_sorted} ${_pwci_rest} )
+list( LENGTH _pwci_sorted _n1 )
+list( LENGTH _pwci_rest _n2 )
+message( STATUS "pwci: init-order sorted ${_n1} sources, ${_n2} unmatched appended last" )
