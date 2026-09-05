@@ -260,6 +260,14 @@ jobs:
             [System.IO.File]::WriteAllText((Resolve-Path $gcpp), $g)
             Select-String -Path $gcpp -Pattern "pwci-local|local_game" | ForEach-Object { "GAMECPP: " + $_.Line }
           }
+          # _SHIPPING + USE_DEVELOPER_COMMANDS: два REGISTER_DEV_CMD ссылаются на функции под #ifndef _SHIPPING
+          $asl = "game/pw/branches/r1117/Src/PF_GameLogic/AdventureScreenLogic.cpp"
+          if ((Test-Path $asl) -and -not (Select-String -Path $asl -Pattern "pwci-shipping" -Quiet)) {
+            $a = [System.IO.File]::ReadAllText((Resolve-Path $asl))
+            $a = $a.Replace("REGISTER_DEV_CMD( debug_talents_award, TalentsAward );", "#ifndef _SHIPPING // pwci-shipping`nREGISTER_DEV_CMD( debug_talents_award, TalentsAward );")
+            $a = $a.Replace("REGISTER_DEV_CMD( debug_choose_party_again, ChoosePartyAgain);", "REGISTER_DEV_CMD( debug_choose_party_again, ChoosePartyAgain);`n#endif // pwci-shipping")
+            [System.IO.File]::WriteAllText((Resolve-Path $asl), $a)
+          }
 
       - name: Locate mt.exe from runner Windows Kits
         shell: pwsh
