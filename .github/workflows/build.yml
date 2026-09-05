@@ -31,7 +31,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: C:\vc9
-          key: vc9-wdk71-v6
+          key: vc9-wdk71-v7
 
       - name: Cache ISOs
         if: steps.vc9cache.outputs.cache-hit != 'true'
@@ -106,8 +106,8 @@ jobs:
           # ATL для WTL
           $incAtl = Get-ChildItem C:\wdkx -Recurse -Directory -Filter atl71 -ErrorAction SilentlyContinue | Select-Object -First 1
           if ($incAtl) { Copy-Item -Recurse -Force $incAtl.FullName C:\vc9\inc_atl }
-          $libAtl = Get-ChildItem C:\wdkx -Recurse -Directory -Filter atl -ErrorAction SilentlyContinue | Where-Object { $_.FullName -match "lib" } | Select-Object -First 1
-          if ($libAtl) { Copy-Item -Recurse -Force $libAtl.FullName C:\vc9\lib_atl }
+          $atls = Get-ChildItem C:\wdkx -Recurse -Filter atls.lib -ErrorAction SilentlyContinue | Where-Object { $_.FullName -match "\\i386\\" } | Select-Object -First 1
+          if ($atls) { Copy-Item -Recurse -Force $atls.DirectoryName C:\vc9\lib_atl; Write-Host "lib_atl from: $($atls.DirectoryName)" } else { Write-Host "WARN: no i386 atls.lib" }
           # --- VC9 STL + sal.h из VS2008 Express ---
           $m2 = Mount-DiskImage -ImagePath C:\iso\VS2008Express.iso -PassThru
           $d2 = ($m2 | Get-Volume).DriveLetter
