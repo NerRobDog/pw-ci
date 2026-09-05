@@ -13,6 +13,9 @@ jobs:
       SRC_REPO: Prime-World-Classic/prime-world-classic
       R1117: pw/branches/r1117
     steps:
+      - name: Checkout pw-ci (stubs, cmake snippets)
+        uses: actions/checkout@v4
+
       - name: Checkout game sources (sparse, LFS)
         uses: actions/checkout@v4
         with:
