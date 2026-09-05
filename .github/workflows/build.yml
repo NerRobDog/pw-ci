@@ -31,7 +31,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: C:\vc9
-          key: vc9-wdk71-v5
+          key: vc9-wdk71-v6
 
       - name: Cache ISOs
         if: steps.vc9cache.outputs.cache-hit != 'true'
@@ -128,6 +128,8 @@ jobs:
           if (-not $sdkinc2) { $sdkinc2 = Get-ChildItem C:\sdkb,C:\sdki -Recurse -Directory -Filter Include -ErrorAction SilentlyContinue | Select-Object -First 1 }
           if ($sdkinc2) { Copy-Item -Recurse -Force $sdkinc2.FullName C:\vc9\inc_sdk; Write-Host "inc_sdk from: $($sdkinc2.FullName)" }
           Get-ChildItem C:\vc9\inc_sdk -Filter *elp32* -ErrorAction SilentlyContinue | ForEach-Object Name
+          $sdklib = Get-ChildItem C:\sdkb,C:\sdki -Recurse -Directory -Filter Lib -ErrorAction SilentlyContinue | Where-Object { Test-Path (Join-Path $_.FullName "DbgHelp.lib") } | Select-Object -First 1
+          if ($sdklib) { Copy-Item -Recurse -Force $sdklib.FullName C:\vc9\lib_sdk; Write-Host "lib_sdk from: $($sdklib.FullName)" } else { Write-Host "WARN: no SDK Lib with DbgHelp.lib" }
           Write-Host "=== staged:"; Get-ChildItem C:\vc9 | ForEach-Object Name; Get-ChildItem C:\vc9\bin | Select-Object -First 40 | ForEach-Object Name
           Dismount-DiskImage -ImagePath C:\iso\WDK71.iso
           Dismount-DiskImage -ImagePath C:\iso\VS2008Express.iso
@@ -146,7 +148,7 @@ jobs:
         run: |
           $cml = "game/pw/branches/r1117/Src/CMakeLists.txt"
           $src = "game/pw/branches/r1117/Src"
-          (Get-Content $cml) -replace [regex]::Escape('file( GLOB_RECURSE ALL_SRCS *.cpp *.c )'), "file( GLOB_RECURSE ALL_SRCS *.cpp *.c )`nlist_remove_regexp( ALL_SRCS `".+/PF/Tools/.+`" )`nlist_remove_regexp( ALL_SRCS `".+/Network/LoginServerSync\\.cpp`" )`nlist_remove_regexp( ALL_SRCS `".+/Network/LoginServerBase\\.cpp`" )`nlist_remove_regexp( ALL_SRCS `".+\\.xtest\\.cpp$`" )`nlist_remove_regexp( ALL_SRCS `".+\\.testbad\\.cpp$`" )`nlist_remove_regexp( ALL_SRCS `".+\\.test[0-9a-z]*\\.cpp$`" )`nlist_remove_regexp( ALL_SRCS `".+/WorldCreator\\.cpp$`" )`nlist_remove_regexp( ALL_SRCS `".+/AdventureScriptMachine\\.cpp$`" )`nlist_remove_regexp( ALL_SRCS `".+/PF_Minigames/Clinic.+\\.cpp$`" )`nlist_remove_regexp( ALL_SRCS `".+/PF_Minigames/Clinic\\.cpp$`" )`nlist_remove_regexp( ALL_SRCS `".+/PWClassic_Sandbox/.+`" )`nlist_remove_regexp( ALL_SRCS `".+/Server/Relay/.+`" )`nlist_remove_regexp( ALL_SRCS `".+/Server/UserManager/.+`" )`nlist_remove_regexp( ALL_SRCS `".+/Server/Monitoring/MonitoringSvc/.+`" )`nlist_remove_regexp( ALL_SRCS `".+/Server/WebServer/.+`" )`nlist_remove_regexp( ALL_SRCS `".+/Server/Chat/.+`" )`nlist_remove_regexp( ALL_SRCS `".+/System/BlockData/src/.+`" )`nlist_remove_regexp( ALL_SRCS `".+/System/Node/.+\\.cpp$`" )`nlist_remove_regexp( ALL_SRCS `".+/StarForce_test\\.cpp$`" )" | Set-Content $cml
+          (Get-Content $cml) -replace [regex]::Escape('file( GLOB_RECURSE ALL_SRCS *.cpp *.c )'), "file( GLOB_RECURSE ALL_SRCS *.cpp *.c )`nlist_remove_regexp( ALL_SRCS `".+/PF/Tools/.+`" )`nlist_remove_regexp( ALL_SRCS `".+/Network/LoginServerSync\\.cpp`" )`nlist_remove_regexp( ALL_SRCS `".+/Network/LoginServerBase\\.cpp`" )`nlist_remove_regexp( ALL_SRCS `".+\\.xtest\\.cpp$`" )`nlist_remove_regexp( ALL_SRCS `".+\\.testbad\\.cpp$`" )`nlist_remove_regexp( ALL_SRCS `".+\\.test[0-9a-z]*\\.cpp$`" )`nlist_remove_regexp( ALL_SRCS `".+/WorldCreator\\.cpp$`" )`nlist_remove_regexp( ALL_SRCS `".+/AdventureScriptMachine\\.cpp$`" )`nlist_remove_regexp( ALL_SRCS `".+/PF_Minigames/Clinic.+\\.cpp$`" )`nlist_remove_regexp( ALL_SRCS `".+/PF_Minigames/Clinic\\.cpp$`" )`nlist_remove_regexp( ALL_SRCS `".+/PWClassic_Sandbox/.+`" )`nlist_remove_regexp( ALL_SRCS `".+/Server/Relay/.+`" )`nlist_remove_regexp( ALL_SRCS `".+/Server/UserManager/.+`" )`nlist_remove_regexp( ALL_SRCS `".+/Server/Monitoring/MonitoringSvc/.+`" )`nlist_remove_regexp( ALL_SRCS `".+/Server/WebServer/.+`" )`nlist_remove_regexp( ALL_SRCS `".+/Server/Chat/.+`" )`nlist_remove_regexp( ALL_SRCS `".+/System/BlockData/src/.+`" )`nlist_remove_regexp( ALL_SRCS `".+/System/Node/.+\\.cpp$`" )`nlist_remove_regexp( ALL_SRCS `".+/StarForce_test\\.cpp$`" )`nlist_remove_regexp( ALL_SRCS `".+/(RdpTestApp|UdpTest|AsyncInvokerTest|FileUnpile)\\.cpp$`" )`nlist_remove_regexp( ALL_SRCS `".+Linux\\.cpp$`" )`nlist_remove_regexp( ALL_SRCS `".+/DBServer\\.auto\\.cpp$`" )`nlist_remove_regexp( ALL_SRCS `".+/CMakeFiles/.+`" )" | Set-Content $cml
           (Get-Content $cml) -replace [regex]::Escape('include_directories( ${SRC_DIR}/Server/NetworkAIO )'), "include_directories( `${SRC_DIR}/Server/NetworkAIO )`ninclude_directories( `${SRC_DIR}/Server/Chat )`ninclude_directories( `${VENDOR}/JsonCpp/include )`ninclude_directories( `${VENDOR}/boost )`ninclude_directories( `${VENDOR}/libcurl/include )`ninclude_directories( `${VENDOR}/tinyxml )`ninclude_directories( `${VENDOR}/pthreads/Pre-built.2/include )" | Set-Content $cml
           $lines = Get-Content $cml
           $out = foreach ($l in $lines) {
@@ -244,7 +246,7 @@ jobs:
         run: |
           set "PATH=C:\vc9\bin\x86;C:\vc9\bin;C:\jom;C:\cmake316\cmake-3.16.9-win64-x64\bin;%MT_DIR%;%PATH%"
           set "INCLUDE=C:\vc9\inc_stl;C:\vc9\inc_crt;C:\vc9\inc_api;C:\vc9\inc_sdk;C:\vc9\inc_atl"
-          set "LIB=C:\vc9\lib_vc;C:\vc9\lib_crt;C:\vc9\lib_win;C:\vc9\lib_atl"
+          set "LIB=C:\vc9\lib_vc;C:\vc9\lib_crt;C:\vc9\lib_win;C:\vc9\lib_sdk;C:\vc9\lib_atl"
           cl 2>&1 | findstr /i version
           if errorlevel 1 echo cl probe nonzero (ok)
           mkdir build
