@@ -214,6 +214,11 @@ jobs:
           if (Test-Path $fu) {
             (Get-Content $fu) -replace '#include "systemStdAfx.h"', '#include "../systemStdAfx.h"' -replace '#include "SystemLog.h"', '#include "../SystemLog.h"' | Set-Content $fu
           }
+          # ThreadLocal.cpp объявляет NT-структуры, которые SDK 7.1 winternl.h уже даёт — переименуем локальные
+          $tl = "game/pw/branches/r1117/Src/System/ThreadLocal.cpp"
+          if (Test-Path $tl) {
+            (Get-Content $tl) -replace 'PEB_LDR_DATA', 'PW_PEB_LDR_DATA' -replace 'RTL_USER_PROCESS_PARAMETERS', 'PW_RTL_USER_PROCESS_PARAMETERS' | Set-Content $tl
+          }
           Select-String -Path $cml -Pattern "ABSENT" | ForEach-Object Line
           # фикс бага сообщества: пропущенная ; в ClientDispatchVisibilityHelper.cpp
           $cdvh = "game/pw/branches/r1117/Src/PF_GameLogic/ClientDispatchVisibilityHelper.cpp"
