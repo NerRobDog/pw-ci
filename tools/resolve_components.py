@@ -326,7 +326,10 @@ def main():
     ap.add_argument('--app', required=True, help='root .application/.component descriptor')
     ap.add_argument('--out', required=True, help='.cmake file to write')
     ap.add_argument('--prefix', default='PWCI_SRV')
-    ap.add_argument('--pch-out', help='generated union precompiled header (default: <out>_pch.h)')
+    ap.add_argument('--pch-out', help='generated union precompiled header (default: <out>_pch)')
+    ap.add_argument('--fallback-pch', default='Src/System/stdafx.h',
+                    help='pch (relative to --root) for game sources whose component subtree '
+                         'declares none; empty to disable')
     ap.add_argument('--list-components', action='store_true')
     args = ap.parse_args()
 
@@ -371,6 +374,7 @@ def main():
     local_groups = []
     pch_groups = []
     claimed = set()
+    claimed_by_pch = set()
     for comp in ordered:
         own = [x for x in comp.sources if x not in claimed]
         claimed.update(own)
@@ -380,6 +384,7 @@ def main():
         defs.extend(comp.defines)
         if comp.pch_set and own:
             pch_groups.append((tuple(comp.pch_set), own))
+            claimed_by_pch.update(own)
         if comp.local_keys and own:
             local_groups.append((normalise_keys(comp.local_keys), own))
 
@@ -402,9 +407,33 @@ def main():
         sys.stderr.write('MISSING COMPONENT: %s (referenced by %s)\n'
                          % (name, os.path.relpath(where, args.root)))
 
+    # Nival's own build left a leaf component with no platformFeatures anywhere in its
+    # subtree without a forced include - and got away with it, because in the .sln build
+    # that leaf was a project of its own with its own settings. In this monolith those
+    # sources (the R*/L*.auto.cpp glue in the Remote/Interface components, mostly) end up
+    # in the same target as everything else and still need windows.h. Give the ones under
+    # Src/ the smallest pch that provides it; Vendor/ sources are left alone, they have
+    # their own idea of what a system header is.
+    fb = args.fallback_pch
+    if fb:
+        fb_path = os.path.normpath(os.path.join(args.root, fb))
+        if os.path.isfile(fb_path):
+            src_root = os.path.normpath(os.path.join(args.root, 'Src'))
+            orphans = [x for x in srcs
+                       if x not in claimed_by_pch
+                       and x.startswith(src_root + os.sep)
+                       and not x.lower().endswith('.c')]
+            if orphans:
+                pch_groups.append(((fb_path,), orphans))
+                sys.stderr.write('fallback pch %s applied to %d orphan sources\n'
+                                 % (fb, len(orphans)))
+        else:
+            sys.stderr.write('WARN: fallback pch %s not found\n' % fb)
+
     # One generated header per distinct pch union, named after its index; Nival keyed the
     # same cache by a hash of the set (platforms.Win32Features.DeteminePCH).
-    base = args.pch_out or os.path.splitext(args.out)[0] + '_pch'
+    # Absolute: cl runs from the build directory, not from where this script was invoked.
+    base = os.path.abspath(args.pch_out or os.path.splitext(args.out)[0] + '_pch')
     pch_files = {}
     for headers, _files in pch_groups:
         if headers in pch_files:
