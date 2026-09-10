@@ -38,6 +38,24 @@ SCOPE = ['Src', '.', 'Src/Server', 'Src/Game/PF', 'Tools']
 # tree ships Vendor/Libc/README.txt with the descriptor removed. Not worth a warning.
 BENIGN_MISSING = {'Vendor/Libc'}
 
+# Header names that MUST come from the toolchain. A component directory holding a file with
+# one of these names cannot go on the include path: Windows filesystems are case insensitive,
+# -I is searched before %INCLUDE%, and the component header wins. Src/Server/RPC/RPC.h
+# swallowing `#include <Rpc.h>` (Src/Server/RPC/Types.h:270) is how 155 TUs died in run
+# 34426859005 - Types.h got the RPC component's own header instead of the SDK's and lost
+# UuidCreate/GUID with it. The client build never noticed because it does not put component
+# directories on the include path.
+SHADOWED_SYSTEM_HEADERS = {
+    'rpc.h', 'windows.h', 'winsock.h', 'winsock2.h', 'ws2tcpip.h', 'winbase.h', 'winnt.h',
+    'io.h', 'time.h', 'math.h', 'string.h', 'stdio.h', 'stdlib.h', 'memory.h', 'new.h',
+    'malloc.h', 'assert.h', 'errno.h', 'float.h', 'limits.h', 'locale.h', 'signal.h',
+    'stdarg.h', 'stddef.h', 'wchar.h', 'ctype.h', 'tchar.h', 'process.h', 'objbase.h',
+}
+
+# Vendor shims are *meant* to shadow (Vendor/UnixEnv ships unistd.h, netdb.h, stdint.h for
+# code written against POSIX), so they are exempt.
+SHADOW_EXEMPT_PREFIXES = ('Vendor/UnixEnv',)
+
 TEMPLATES = [
     '{path}/{name}.component',
     '{path}/{name}.application',
@@ -399,6 +417,20 @@ def main():
     srcs, incs, libs = uniq(srcs), uniq(incs), uniq(libs)
     defs = normalise_keys(defs)
 
+    kept = []
+    for d in incs:
+        rel = cm(os.path.relpath(d, r.root))
+        if rel.startswith(SHADOW_EXEMPT_PREFIXES) or not os.path.isdir(d):
+            kept.append(d)
+            continue
+        clash = sorted(f for f in os.listdir(d)
+                       if f.lower() in SHADOWED_SYSTEM_HEADERS)
+        if clash:
+            sys.stderr.write('DROPPED INCLUDE DIR %s: shadows %s\n' % (rel, ', '.join(clash)))
+        else:
+            kept.append(d)
+    incs = kept
+
     if args.list_components:
         for c in ordered:
             print('%-4d %s' % (len(c.sources), os.path.relpath(c.descriptor, args.root)))
@@ -416,9 +448,9 @@ def main():
     # their own idea of what a system header is.
     fb = args.fallback_pch
     if fb:
-        fb_path = os.path.normpath(os.path.join(args.root, fb))
+        fb_path = os.path.normpath(os.path.join(r.root, fb))
         if os.path.isfile(fb_path):
-            src_root = os.path.normpath(os.path.join(args.root, 'Src'))
+            src_root = os.path.join(r.root, 'Src')
             orphans = [x for x in srcs
                        if x not in claimed_by_pch
                        and x.startswith(src_root + os.sep)

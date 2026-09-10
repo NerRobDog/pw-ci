@@ -331,7 +331,9 @@ jobs:
         run: |
           $dst = "build/logs"
           New-Item -ItemType Directory -Force -Path $dst | Out-Null
-          foreach ($f in @("build/cmake-configure.log","build/jom.log","build/CMakeFiles/CMakeError.log","build/CMakeFiles/CMakeOutput.log","cmake/pwci_server_srcs.cmake","resolve-components.log")) {
+          # flags.make / the include response file are the only place the actual cl command
+          # line is visible; a wrong -D or a relative /FI is invisible in jom.log otherwise.
+          foreach ($f in @("build/cmake-configure.log","build/jom.log","build/CMakeFiles/CMakeError.log","build/CMakeFiles/CMakeOutput.log","cmake/pwci_server_srcs.cmake","resolve-components.log","build/CMakeFiles/UniServerApp.dir/flags.make","build/CMakeFiles/UniServerApp.dir/build.make")) {
             if (Test-Path $f) { Copy-Item $f $dst -Force } else { Write-Host "no $f" }
           }
           # condensed error list - this is the deliverable of an exploratory run
