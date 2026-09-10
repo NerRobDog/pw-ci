@@ -98,6 +98,23 @@ class RPCBuilderStub(object):
         self.filename = filename
 
 
+class ThriftBuilderStub(object):
+    """ThriftBuilder('x.thrift', 'cpp', output='Svc') -> <comp>/Svc/gen-cpp/*.cpp"""
+
+    def __init__(self, path=None, lang=None, output=''):
+        self.output = output
+
+
+class CodeGenStub(object):
+    """CodeGen(dir, [*.cs], 'DBServer') -> <comp>/DBServer.auto.{h,cpp}
+
+    (Tools/TestFramework/codegenBuilder.py: DBCodeGen.exe --custom=<target> --out=<comp>)
+    """
+
+    def __init__(self, path=None, sources=None, target=None):
+        self.target = target
+
+
 class Component(object):
     def __init__(self, name, descriptor):
         self.name = name
@@ -161,8 +178,8 @@ def load_descriptor(path, platform='win32', configuration='release'):
         'LinuxFeatures': _Stub,
         'MacFeatures': _Stub,
         'RPCBuilder': RPCBuilderStub,
-        'CodeGen': _Stub,
-        'ThriftBuilder': _Stub,
+        'CodeGen': CodeGenStub,
+        'ThriftBuilder': ThriftBuilderStub,
         'InstallBuilder': _Stub,
         'CopyBuilder': _Stub,
         'getDefaultSources': get_default_sources,
@@ -236,19 +253,39 @@ class Resolver(object):
             else:
                 sys.stderr.write('WARN: %s: source not on disk: %s\n' % (descriptor, s))
 
-        # generated RPC glue that ships in the tree
+        # Generated glue. Nival's builders run codegen at build time; the published tree
+        # ships their output, so resolve each builder to the files it would have produced.
+        # Without this the RPC stubs, the DB type registry (NDb::SessionRoot & co) and the
+        # thrift service processors are all missing at link time.
         for b in l.get('builders', []) or []:
-            if not isinstance(b, RPCBuilderStub) or not b.filename:
-                continue
-            base = os.path.splitext(os.path.basename(b.filename))[0]
-            prefix = {'Local': 'L', 'Remote': 'R'}.get(b.typename)
-            if prefix is None:
-                continue
-            gen = os.path.normpath(os.path.join(
-                comp.dir, os.path.dirname(b.filename.replace('\\', '/')),
-                '%s%s.auto.cpp' % (prefix, base)))
-            if os.path.isfile(gen):
-                comp.sources.append(gen)
+            if isinstance(b, RPCBuilderStub) and b.filename:
+                base = os.path.splitext(os.path.basename(b.filename))[0]
+                prefix = {'Local': 'L', 'Remote': 'R'}.get(b.typename)
+                if prefix is None:
+                    continue
+                gen = os.path.normpath(os.path.join(
+                    comp.dir, os.path.dirname(b.filename.replace('\\', '/')),
+                    '%s%s.auto.cpp' % (prefix, base)))
+                if os.path.isfile(gen):
+                    comp.sources.append(gen)
+            elif isinstance(b, CodeGenStub) and b.target:
+                gen = os.path.normpath(os.path.join(comp.dir, b.target + '.auto.cpp'))
+                if os.path.isfile(gen):
+                    comp.sources.append(gen)
+                else:
+                    sys.stderr.write('WARN: %s: CodeGen output missing: %s\n'
+                                     % (descriptor, b.target + '.auto.cpp'))
+            elif isinstance(b, ThriftBuilderStub):
+                gendir = os.path.normpath(os.path.join(
+                    comp.dir, b.output.replace('\\', '/'), 'gen-cpp'))
+                if not os.path.isdir(gendir):
+                    sys.stderr.write('WARN: %s: thrift gen-cpp missing: %s\n'
+                                     % (descriptor, gendir))
+                    continue
+                for f in sorted(os.listdir(gendir)):
+                    # *_server.skeleton.cpp is thrift's sample server, it has its own main()
+                    if f.endswith('.cpp') and 'skeleton' not in f:
+                        comp.sources.append(os.path.join(gendir, f))
 
         comp.include_paths.append(comp.dir)
         for p in l.get('includePaths', []) or []:

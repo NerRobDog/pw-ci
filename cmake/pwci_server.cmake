@@ -109,6 +109,43 @@ add_definitions( -DCURL_STATICLIB )   # Vendor/libcurl is a static build, same a
 PWCI_SRV_apply_pch()
 
 # ---------------------------------------------------------------------------------------
+# 5b. Sources the published descriptors no longer name.
+#
+# Three gaps the component graph cannot close on its own, all found at the first link
+# (run 34428467850, 47 unresolved externals):
+#
+#   Vendor/wsdlpull - the published all.component was reduced to `includePaths = ['src']`
+#     plus a zdll dependency, i.e. it now describes a prebuilt library. Vendor/wsdlpull/lib
+#     does not exist in the tree, but the full source does, so build it. (ZZimaService.cpp
+#     is the only consumer: WsdlPull::WsdlInvoker, plus W3Client from win32/w3c.cpp.)
+#
+#   Src/Shared/WebRequests.cpp - a community addition with a .vcproj and no .component, so
+#     nothing in the graph can reach it. It defines WebPostRequest, GetSessionData and the
+#     `int usedServer` that ClusterConfiguration.cpp expects from server_ip.h.
+#
+#   Src/System/CrashRptWrapper.cpp - the component compiles it only when the application
+#     sets settings.enableCrashRpt, and UniServerApp.application does. This resolver does not
+#     model Nival's cross-component `settings` object, so add the file directly; main.cpp
+#     calls InstallForProcess/UninstallFromProcess unconditionally (the header only guards
+#     the per-thread pair), and Vendor/CrashRpt ships both the header and the .lib.
+# ---------------------------------------------------------------------------------------
+file( GLOB PWCI_SRV_WSDLPULL
+  ${VENDOR}/wsdlpull/src/wsdlparser/*.cpp
+  ${VENDOR}/wsdlpull/src/schemaparser/*.cpp
+  ${VENDOR}/wsdlpull/src/xmlpull/*.cpp
+  ${VENDOR}/wsdlpull/win32/*.cpp
+)
+include_directories( ${VENDOR}/wsdlpull/src ${VENDOR}/wsdlpull/win32 )
+
+set( ALL_SRCS ${ALL_SRCS}
+  ${PWCI_SRV_WSDLPULL}
+  ${SRC_DIR}/Shared/WebRequests.cpp
+  ${SRC_DIR}/System/CrashRptWrapper.cpp
+)
+list( LENGTH PWCI_SRV_WSDLPULL _n_wsdl )
+message( STATUS "pwci-server: + ${_n_wsdl} wsdlpull sources, WebRequests.cpp, CrashRptWrapper.cpp" )
+
+# ---------------------------------------------------------------------------------------
 # 6. Libraries.
 #
 # rpcrt4 / shlwapi come from UniServerApp.application libDependencies (rpcrt4 is already in
@@ -118,6 +155,7 @@ PWCI_SRV_apply_pch()
 # components only contribute a couple of files, so keep the prebuilt libs too.
 # ---------------------------------------------------------------------------------------
 simple_add_library( shlwapi )
+simple_add_library( wininet )   # Src/Shared/WebRequests.cpp, PF_GameLogic/WebLauncher.h
 simple_add_library( wbemuuid )
 simple_add_library( ws2_32 )
 simple_add_library( wldap32 )
