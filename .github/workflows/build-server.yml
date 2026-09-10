@@ -11,6 +11,14 @@ on:
         description: "Extra compile definitions, e.g. -DNI_ENABLE_INLINE_PROFILER"
         required: false
         default: ""
+  # workflow_dispatch alone is unusable while this file lives outside the default branch:
+  # GitHub only registers dispatchable workflows from the default branch, so `gh workflow run
+  # build-server.yml --ref server-build` answers 404. This push trigger is scoped to the one
+  # branch and exists purely so exploratory runs can be started at all. Drop it (leaving
+  # workflow_dispatch) the moment this lands on main. Still no cron.
+  push:
+    branches:
+      - server-build
 
 jobs:
   build:
