@@ -11,11 +11,14 @@ namespace ATL
 
 // Remote RPC factories generated into R*.auto.cpp files that are not published.
 // Explicit specializations with empty bodies satisfy the linker; incomplete types are fine for pointer params.
-namespace lobby { class RIEntrance; }
+//
+// lobby::RIEntrance is NOT one of them: Game/PF/Server/LobbyPvx/RLobbyIEntrance.auto.cpp
+// is published, it is just excluded by CMakeLists and re-added under the wrong path.
+// An empty stub here links fine and registers nothing, so the client crashes the first
+// time it queries the lobby Entrance - see cmake/pwci_extra.cmake.
 namespace Monitoring { class RIMonitor; }
 namespace rpc
 {
   template <typename T> void RegisterRemoteFactory( T* instance );
-  template <> void RegisterRemoteFactory<lobby::RIEntrance>( lobby::RIEntrance* ) {}
   template <> void RegisterRemoteFactory<Monitoring::RIMonitor>( Monitoring::RIMonitor* ) {}
 }
