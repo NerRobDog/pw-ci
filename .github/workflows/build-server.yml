@@ -272,6 +272,19 @@ jobs:
             [System.IO.File]::WriteAllText((Resolve-Path $gcpp), $g)
             Select-String -Path $gcpp -Pattern "pwci-local|local_game" | ForEach-Object { "GAMECPP: " + $_.Line }
           }
+          # Дрейф опубликованного дерева: LobbyServerNode.cpp(253) присваивает
+          # WebLauncherPostRequest::WebUserData::playerRating, а в WebLauncher.h такого поля нет
+          # (есть currentRating/victoryRating/lossRating). Поле только пишется, нигде не читается,
+          # поэтому добавляем его в структуру, а не выкусываем строку.
+          $wl = "game/pw/branches/r1117/Src/PF_GameLogic/WebLauncher.h"
+          if ((Test-Path $wl) -and -not (Select-String -Path $wl -Pattern "playerRating" -Quiet)) {
+            $w = [System.IO.File]::ReadAllText((Resolve-Path $wl))
+            $w = $w.Replace("WebUserData(): heroSkinID(0), currentRating(1100)", "WebUserData(): heroSkinID(0), playerRating(1100), currentRating(1100)")
+            $w = $w.Replace("    float currentRating;", "    float playerRating;`n    float currentRating;")
+            [System.IO.File]::WriteAllText((Resolve-Path $wl), $w)
+            Select-String -Path $wl -Pattern "playerRating" | ForEach-Object { "WEBLAUNCHER: " + $_.Line.Trim() }
+          }
+
           # _SHIPPING + USE_DEVELOPER_COMMANDS: два REGISTER_DEV_CMD ссылаются на функции под #ifndef _SHIPPING
           $asl = "game/pw/branches/r1117/Src/PF_GameLogic/AdventureScreenLogic.cpp"
           if ((Test-Path $asl) -and -not (Select-String -Path $asl -Pattern "pwci-shipping" -Quiet)) {

@@ -56,6 +56,14 @@ SHADOWED_SYSTEM_HEADERS = {
 # code written against POSIX), so they are exempt.
 SHADOW_EXEMPT_PREFIXES = ('Vendor/UnixEnv',)
 
+# Vendor/Thrift/all.component asks for NOMINMAX, but thrift 0.9.1 calls plain `min` in
+# TZlibTransport.cpp:146 with no `using namespace std` in sight - the only thing that ever
+# resolved it is the windows.h macro that NOMINMAX suppresses. The one build of UniServerApp
+# known to have produced an exe (the community's CMakeGenerator output committed as
+# Src/Game/PF/UniServer/UniServerApp.auto/CMakeLists.txt) drops every localDefine, NOMINMAX
+# included, so this follows it.
+DROPPED_LOCAL_DEFINES = {'NOMINMAX'}
+
 TEMPLATES = [
     '{path}/{name}.component',
     '{path}/{name}.application',
@@ -103,6 +111,7 @@ class Component(object):
         self.children = []
         self.pch = None
         self.pch_set = []
+        self.inlined = True
 
 
 def _collect_files(start, patterns, ignored, recursive):
@@ -265,12 +274,18 @@ class Resolver(object):
         for k in l.get('localCompilerKeys', []) or []:
             comp.local_keys.append(k)
         for d in l.get('localDefines', []) or []:
+            if d in DROPPED_LOCAL_DEFINES:
+                continue
             comp.local_keys.append('/D ' + d)
 
         # Nival compiled every component with /FI"<generated pch>" where the generated
         # header just #includes whatever platformFeatures declared (see
         # Tools/TestFramework/platforms.py Win32Features.Apply). Without it the sources
         # that rely on the pch for their common includes do not compile standalone.
+        # inlined defaults to True; a component that opts out (or declares type='dll') was a
+        # link unit of its own in Nival's build and never saw anyone else's pch.
+        comp.inlined = bool(l.get('inlined', True)) and l.get('type') not in ('dll', 'lib')
+
         pf = l.get('platformFeatures') or {}
         feature = pf.get('win32') if isinstance(pf, dict) else None
         pch_name = None
@@ -451,8 +466,17 @@ def main():
         fb_path = os.path.normpath(os.path.join(r.root, fb))
         if os.path.isfile(fb_path):
             src_root = os.path.join(r.root, 'Src')
+            # Src/MemoryLib is the one non-inlined component here: it was its own DLL, it
+            # replaces operator new, and Src/System/stdafx.h pulls MemoryLib/newdelete.h back
+            # in ahead of NewHandler.cpp's own <new.h> - which is how _set_new_handler went
+            # missing in run 34427497579. Leave separately-linked components alone.
+            standalone = set()
+            for c in ordered:
+                if not c.inlined:
+                    standalone.update(c.sources)
             orphans = [x for x in srcs
                        if x not in claimed_by_pch
+                       and x not in standalone
                        and x.startswith(src_root + os.sep)
                        and not x.lower().endswith('.c')]
             if orphans:
