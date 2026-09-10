@@ -322,6 +322,8 @@ jobs:
               const int pwciDevLobby = CmdLineLite::Instance().GetIntKey( "-dev_lobby", ( pwciMapId && pwciMapId[0] ) ? 0 : 1 );
               if ( pwciDevLobby )
                 g_sessionStatus = WebLauncherPostRequest::RegisterInSessionRequest_Error;
+              extern bool g_pwciDevLobby; // pwci-relobby: GameContext must know no launcher will respawn us
+              g_pwciDevLobby = pwciDevLobby ? true : false;
               g_devLogin = pwciLogin.c_str();
               g_sessionToken = pwciSess;
               systemLog( NLogg::LEVEL_MESSAGE ) << "pwci-devlogin: login=[" << pwciLogin.c_str() << "] session=[" << pwciSess << "] lobby=" << pwciDevLobby << endl;
@@ -356,6 +358,99 @@ jobs:
           if ($s -eq $before) { throw "SelectGameModeScreen.cpp: neither RefreshGamesList nor PopGameList matched" }
           [System.IO.File]::WriteAllText((Resolve-Path $f), $s)
           Select-String -Path $f -Pattern "pwci-devlobby|RefreshGamesList|PopGameList" | ForEach-Object { "SGMS: " + $_.Line }
+
+      - name: Patch GameContext.cpp (return to the lobby when the match is over)
+        shell: pwsh
+        run: |
+          # Nival's client is spawned by the web launcher for one game and is meant to die with
+          # it, so GameContext has no way back to the lobby. When the game service destroys the
+          # session the game-server channel closes: OnChannelClosed lights up the network status
+          # screen ("connection lost"), switches to EContextStatus::Cleanup, and Cleanup() logs
+          # the transport out and drops lobbyClient. From then on Poll() has nothing left to do
+          # and the process sits on the dead battle screen until it is killed by hand. That is
+          # fine for the launcher flow (the launcher respawns the exe per match) and useless for
+          # -dev_lobby, where nobody will respawn us. So do the restart here: throw away the
+          # screens the match left behind and call Start() again - it re-logs in with the same
+          # devLogin/sessionToken, and lobby::ClientPW::GotoFirstLobbyScreen pushes a fresh
+          # SelectGameModeScreen once the lobby answers, exactly like on the first login.
+          # Fast reconnect giving up gets the same treatment: a live lobby beats a dead battle.
+          $f = "game/pw/branches/r1117/Src/PW_Client/GameContext.cpp"
+          if (-not (Test-Path $f)) { throw "no PW_Client/GameContext.cpp" }
+          $s = [System.IO.File]::ReadAllText((Resolve-Path $f))
+          if ($s.Contains("pwci-relobby")) { Write-Host "already patched"; exit 0 }
+
+          # 1. state, shared with the -dev_login patch in Game.cpp
+          $a1 = 'REGISTER_VAR( "rdp_base_port", s_base_udp_port , STORAGE_NONE );'
+          $r1 = @'
+          REGISTER_VAR( "rdp_base_port", s_base_udp_port , STORAGE_NONE );
+
+          // pwci-relobby: state for the launcher-free return to the lobby.
+          // g_pwciDevLobby is set from Game.cpp when -dev_lobby is on; dev_relobby is the switch.
+          bool g_pwciDevLobby = false;
+          static bool s_pwciRelobbyPending = false;
+          static int s_pwci_relobby = 1;
+          REGISTER_VAR( "dev_relobby", s_pwci_relobby, STORAGE_NONE );
+          '@
+
+          # 2. the re-login itself, one Poll after Cleanup() has run
+          $a2 = '  PollFastReconnect();'
+          $r2 = @'
+            PollFastReconnect();
+
+            // pwci-relobby: the match is over (or fast reconnect gave up) and Cleanup() has
+            // already torn the context down, so log back in and land on the lobby screen
+            // instead of hanging on the battle screen with "connection lost". The resets below
+            // are what Start() expects to find: it bails out on a live loadingScreen, and the
+            // screens and flags left over from the finished game must not leak into the new
+            // session. ClearStack + push of the new loading screen are queued in that order, so
+            // the old screens are gone before the fresh one is inserted.
+            if ( s_pwciRelobbyPending && ( status == EContextStatus::Ready || status == EContextStatus::Error ) )
+            {
+              s_pwciRelobbyPending = false;
+              MessageTrace( "pwci-relobby: session over, logging back in as '%s'", devLogin.c_str() );
+
+              fastReconnectCtx = 0;
+              inputChannel = 0;
+
+              NScreenCommands::PushCommand( NScreenCommands::CreateClearStackCommand() );
+              loadingScreen = 0;
+              loadingStatusHandler = 0;
+              networkStatusScreen = 0;
+              clientWasInitialized = false;
+
+              status = EContextStatus::Ready;
+              Start();
+              return -1;
+            }
+          '@
+
+          # 3. arm it when the game server channel dies and no fast reconnect will run
+          $a3 = '    status = EContextStatus::Cleanup;'
+          $r3 = @'
+              // pwci-relobby: no launcher will respawn us, so have Poll() log back into the lobby
+              if ( g_pwciDevLobby && s_pwci_relobby && !fastReconnectCtx )
+                s_pwciRelobbyPending = true;
+
+              status = EContextStatus::Cleanup;
+          '@
+
+          # 4. ...and when fast reconnect has burned every try
+          $a4 = '    networkStatusScreen->SetFastReconnectTryIndex( 0 );'
+          $r4 = @'
+              networkStatusScreen->SetFastReconnectTryIndex( 0 );
+              if ( g_pwciDevLobby && s_pwci_relobby ) // pwci-relobby
+                s_pwciRelobbyPending = true;
+          '@
+
+          foreach ($p in @(,@($a1,$r1)) + @(,@($a2,$r2)) + @(,@($a3,$r3)) + @(,@($a4,$r4))) {
+            $anchor = $p[0]
+            $repl = ($p[1] -replace "`r`n", "`n").TrimEnd("`n")
+            $hits = ([regex]::Matches($s, [regex]::Escape($anchor))).Count
+            if ($hits -ne 1) { throw "GameContext.cpp: anchor <$anchor> matched $hits times, expected 1" }
+            $s = $s.Replace($anchor, $repl)
+          }
+          [System.IO.File]::WriteAllText((Resolve-Path $f), $s)
+          Select-String -Path $f -Pattern "pwci-relobby" | ForEach-Object { "GAMECTX: " + $_.Line }
 
       - name: Patch LoginClient.cpp (trust the relay address the cluster sent)
         shell: pwsh
