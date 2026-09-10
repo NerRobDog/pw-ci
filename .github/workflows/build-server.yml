@@ -281,6 +281,21 @@ jobs:
             [System.IO.File]::WriteAllText((Resolve-Path $asl), $a)
           }
 
+      - name: Resolve UniServerApp component graph
+        shell: pwsh
+        run: |
+          # Nival described UniServerApp with .application/.component descriptors, not with
+          # CMake. tools/resolve_components.py walks that graph and emits the exact source /
+          # include / define set; cmake/pwci_server.cmake includes the result.
+          python --version
+          python tools/resolve_components.py `
+            --root game/pw/branches/r1117 `
+            --app  game/pw/branches/r1117/Src/Game/PF/UniServer/UniServerApp.application `
+            --out  cmake/pwci_server_srcs.cmake `
+            --list-components 2>&1 | Tee-Object -FilePath resolve-components.log
+          if (-not (Test-Path cmake/pwci_server_srcs.cmake)) { throw "resolver produced nothing" }
+          Get-Content cmake/pwci_server_srcs.cmake -TotalCount 3
+
       - name: Locate mt.exe from runner Windows Kits
         shell: pwsh
         run: |
@@ -316,7 +331,7 @@ jobs:
         run: |
           $dst = "build/logs"
           New-Item -ItemType Directory -Force -Path $dst | Out-Null
-          foreach ($f in @("build/cmake-configure.log","build/jom.log","build/CMakeFiles/CMakeError.log","build/CMakeFiles/CMakeOutput.log")) {
+          foreach ($f in @("build/cmake-configure.log","build/jom.log","build/CMakeFiles/CMakeError.log","build/CMakeFiles/CMakeOutput.log","cmake/pwci_server_srcs.cmake","resolve-components.log")) {
             if (Test-Path $f) { Copy-Item $f $dst -Force } else { Write-Host "no $f" }
           }
           # condensed error list - this is the deliverable of an exploratory run
