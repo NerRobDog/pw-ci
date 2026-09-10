@@ -95,10 +95,16 @@ add_definitions( -DCURL_STATICLIB )   # Vendor/libcurl is a static build, same a
 # 5. Forced includes (Nival's per-component PCH).
 #
 # Tools/TestFramework/platforms.py compiled every source of a component with
-# /FI"<generated pch>", where the generated header just #includes whatever
-# platformFeatures = { 'win32': Win32Features('stdafx.h') } declared. Several components
-# (System/Node, the *Svc trees) rely on that for their common includes and do not compile
-# standalone. The macro replays it as per-source COMPILE_FLAGS.
+# /FI"<generated pch>", where the generated header #includes whatever
+# platformFeatures = { 'win32': Win32Features('stdafx.h') } declared - for that component
+# AND for every inlined component below it, since componentAnalyzer merges the children's
+# features up before applying (RemoveDummyDependencies -> InlinePlatformFeatures ->
+# ApplyPlatformFeatures). Nothing in this codebase includes <windows.h> on its own; the pch
+# is where it comes from. Skipping it cost 290 of 619 TUs in run 34425524256, 132 of them
+# on Src/Server/RPC/Types.h alone - it guards `#include <Rpc.h>` on NV_WIN_PLATFORM, and
+# Src/System/config.h only defines that once something has pulled it in.
+# The resolver emits one generated header per distinct union and this macro attaches them
+# as per-source COMPILE_FLAGS. .c sources are left alone - they cannot swallow a C++ pch.
 # ---------------------------------------------------------------------------------------
 PWCI_SRV_apply_pch()
 

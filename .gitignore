@@ -1,2 +1,3 @@
 cmake/pwci_server_srcs.cmake
 resolve-components.log
+cmake/pwci_server_srcs_pch*.h
