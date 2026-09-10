@@ -123,11 +123,11 @@ PWCI_SRV_apply_pch()
 #     nothing in the graph can reach it. It defines WebPostRequest, GetSessionData and the
 #     `int usedServer` that ClusterConfiguration.cpp expects from server_ip.h.
 #
-#   Src/System/CrashRptWrapper.cpp - the component compiles it only when the application
-#     sets settings.enableCrashRpt, and UniServerApp.application does. This resolver does not
-#     model Nival's cross-component `settings` object, so add the file directly; main.cpp
-#     calls InstallForProcess/UninstallFromProcess unconditionally (the header only guards
-#     the per-thread pair), and Vendor/CrashRpt ships both the header and the .lib.
+# Src/System/CrashRptWrapper.cpp used to be listed here too; it now arrives through the graph,
+# because the resolver models Nival's cross-component `settings` object and
+# UniServerApp.application sets settings.enableCrashRpt. settings.enableProfiler stays
+# ignored - it swaps the profiler stub for the real sampler and pulls
+# System/InlineProfiler3/UI, a GUI, into a headless server.
 # ---------------------------------------------------------------------------------------
 file( GLOB PWCI_SRV_WSDLPULL
   ${VENDOR}/wsdlpull/src/wsdlparser/*.cpp
@@ -140,10 +140,9 @@ include_directories( ${VENDOR}/wsdlpull/src ${VENDOR}/wsdlpull/win32 )
 set( ALL_SRCS ${ALL_SRCS}
   ${PWCI_SRV_WSDLPULL}
   ${SRC_DIR}/Shared/WebRequests.cpp
-  ${SRC_DIR}/System/CrashRptWrapper.cpp
 )
 list( LENGTH PWCI_SRV_WSDLPULL _n_wsdl )
-message( STATUS "pwci-server: + ${_n_wsdl} wsdlpull sources, WebRequests.cpp, CrashRptWrapper.cpp" )
+message( STATUS "pwci-server: + ${_n_wsdl} wsdlpull sources, WebRequests.cpp" )
 
 # ---------------------------------------------------------------------------------------
 # 6. Libraries.

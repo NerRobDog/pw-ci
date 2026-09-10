@@ -92,6 +92,38 @@ class _Stub(object):
         return _Stub(*a, **kw)
 
 
+class Settings(object):
+    """Nival's cross-component settings object.
+
+    componentAnalyzer.ComponentLoader keeps ONE Settings instance for the whole load, so
+    `settings.enableCrashRpt = True` in the .application is visible to every .component
+    loaded afterwards - that is how Src/System/CrashRptWrapper.component decides between
+    compiling CrashRptWrapper.cpp and defining NI_DISABLE_CRASHRPT.
+
+    `ignored` forces get() to answer None for a name whatever the application asked for.
+    UniServerApp.application also sets enableProfiler, which swaps InlineProfiler3/SamplerStub
+    for the real Sampler and drags System/InlineProfiler3/UI - a GUI - into a headless
+    server; that one stays off until somebody wants it.
+    """
+
+    def __init__(self, ignored=()):
+        object.__setattr__(self, '_values', {})
+        object.__setattr__(self, '_ignored', set(ignored))
+
+    def __setattr__(self, name, value):
+        self._values[name] = value
+
+    def __getattr__(self, name):
+        if name.startswith('_'):
+            raise AttributeError(name)
+        return self._values.get(name)
+
+    def get(self, name, default=None):
+        if name in self._ignored:
+            return default
+        return self._values.get(name, default)
+
+
 class RPCBuilderStub(object):
     def __init__(self, typename=None, filename=None, flt='', includes=None):
         self.typename = typename
@@ -149,10 +181,11 @@ def _py2_open(name, mode='r', *a, **kw):
     return open(name, mode.replace('b', '') or 'r', errors='replace')
 
 
-def load_descriptor(path, platform='win32', configuration='release'):
+def load_descriptor(path, platform='win32', configuration='release', settings=None):
     """exec the component file the way Nival's loader does, return its locals."""
     directory = os.path.dirname(path)
-    settings = _Stub()
+    if settings is None:
+        settings = Settings()
 
     def get_default_sources(patterns, ignored=(), recursive=True):
         files = _collect_files(directory, list(patterns), list(ignored), recursive)
@@ -204,7 +237,8 @@ def load_descriptor(path, platform='win32', configuration='release'):
 
 
 class Resolver(object):
-    def __init__(self, root, verbose=False):
+    def __init__(self, root, verbose=False, ignored_settings=()):
+        self.settings = Settings(ignored_settings)
         self.root = os.path.abspath(root)
         self.scope = [os.path.normpath(os.path.join(self.root, p)) for p in SCOPE]
         self.verbose = verbose
@@ -230,7 +264,7 @@ class Resolver(object):
         self.by_descriptor[descriptor] = comp
 
         try:
-            l = load_descriptor(descriptor)
+            l = load_descriptor(descriptor, settings=self.settings)
         except Exception as exc:                      # noqa: BLE001
             sys.stderr.write('WARN: cannot evaluate %s: %r\n' % (descriptor, exc))
             return comp
@@ -401,9 +435,11 @@ def main():
                     help='pch (relative to --root) for game sources whose component subtree '
                          'declares none; empty to disable')
     ap.add_argument('--list-components', action='store_true')
+    ap.add_argument('--ignore-setting', action='append', default=['enableProfiler'],
+                    help='force settings.get(NAME) to None (repeatable)')
     args = ap.parse_args()
 
-    r = Resolver(args.root)
+    r = Resolver(args.root, ignored_settings=args.ignore_setting)
     root = r.resolve(args.app)
 
     # Post-order: a component's dependencies are emitted before the component itself.
