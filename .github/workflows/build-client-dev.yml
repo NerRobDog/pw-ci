@@ -1,8 +1,10 @@
 name: build-client-dev
 
-# Copy of build-client plus one extra patch step: a command-line login path
+# Copy of build-client plus two extra patch steps: a command-line login path
 # (-dev_login <name>) that bypasses the community web launcher, so the client can
-# log in to a self-hosted UniServerApp cluster. Same VC9 toolchain and the same
+# log in to a self-hosted UniServerApp cluster, and -dev_lobby, which parks the
+# launcher state machine so the client stops on the dev lobby screen instead of
+# creating a bot match on the first frame after login. Same VC9 toolchain and the same
 # C:\vc9 cache key (vc9-wdk71-v7) as build-client and build-server.
 #
 # workflow_dispatch alone is unusable while this file lives outside the default
@@ -299,6 +301,15 @@ jobs:
             //                          checks session keys, and it stays suspended without RDP)
             //   -dev_login_tab 1       prepend the TAB that the community web-launcher flow puts in
             //                          front of the nickname (ClientAuth::DevAuth compares login+1)
+            //   -dev_lobby 0|1         stay on the lobby screen after login instead of creating a
+            //                          game right away. Default: 1 when no mapId was given, 0 with one.
+            //                          Why it is needed: g_sessionStatus is a plain global with no
+            //                          initializer, so it starts at 0 == RegisterInSessionRequest_Create,
+            //                          and SelectGameModeScreen::Step reads that as "the launcher asked
+            //                          for a new game" and calls CreateGame( MOBA, 10 ) on the first
+            //                          frame after the lobby connects. Parking it on _Error (a terminal
+            //                          state nothing acts on) leaves the whole launcher state machine
+            //                          idle, so the dev lobby UI waits for the player instead.
             const char * pwciDevLogin = CmdLineLite::Instance().GetStringKey( "-dev_login", "" );
             if ( s_localGame || isReplay ) { context->Start(); }
             else if ( pwciDevLogin && pwciDevLogin[0] )
@@ -308,9 +319,12 @@ jobs:
                 pwciLogin = std::string( "\t" ) + pwciLogin;
               const char * pwciSess = sessLogin ? sessLogin : "";
               const char * pwciMapId = CmdLineLite::Instance().GetStringKey( "mapId", "" );
+              const int pwciDevLobby = CmdLineLite::Instance().GetIntKey( "-dev_lobby", ( pwciMapId && pwciMapId[0] ) ? 0 : 1 );
+              if ( pwciDevLobby )
+                g_sessionStatus = WebLauncherPostRequest::RegisterInSessionRequest_Error;
               g_devLogin = pwciLogin.c_str();
               g_sessionToken = pwciSess;
-              systemLog( NLogg::LEVEL_MESSAGE ) << "pwci-devlogin: login=[" << pwciLogin.c_str() << "] session=[" << pwciSess << "]" << endl;
+              systemLog( NLogg::LEVEL_MESSAGE ) << "pwci-devlogin: login=[" << pwciLogin.c_str() << "] session=[" << pwciSess << "] lobby=" << pwciDevLobby << endl;
               context = new Game::GameContext( pwciSess, g_devLogin.c_str(), pwciMapId, socialServer, guildEmblem, isSpectator, false );
               context->Start();
             }
@@ -321,6 +335,27 @@ jobs:
           $g = $g.Replace($anchor, $repl)
           [System.IO.File]::WriteAllText((Resolve-Path $gcpp), $g)
           Select-String -Path $gcpp -Pattern "pwci-devlogin" | ForEach-Object { "GAMECPP: " + $_.Line }
+
+      - name: Patch SelectGameModeScreen.cpp (revive the dev lobby games list)
+        shell: pwsh
+        run: |
+          # The dev lobby screen (Lobby_SelectGameMode) is still built and still pushed by
+          # lobby::ClientPW::GotoFirstLobbyScreen when the lobby connects outside social mode,
+          # but the community edit commented out the two calls that feed its "Games" list:
+          # RefreshGamesList() in Init and PopGameList() in Step. Without them the list is
+          # always empty, so a second player has nothing to click to join the first player's
+          # game - and the launcher's own Connect/Reconnect states, which scan the same list,
+          # are dead too. Uncommenting both is what makes the lobby usable; it cannot regress
+          # the launcher flow, which today iterates an always-empty vector.
+          $f = "game/pw/branches/r1117/Src/PW_Client/SelectGameModeScreen.cpp"
+          if (-not (Test-Path $f)) { throw "no PW_Client/SelectGameModeScreen.cpp" }
+          $s = [System.IO.File]::ReadAllText((Resolve-Path $f))
+          $before = $s
+          $s = $s -replace '(?m)^/\*\r?\n(\s*if \( StrongMT<Game::IGameContextUiInterface> cl = gameCtx\.Lock\(\) \)\r?\n\s*cl->RefreshGamesList\(\);\r?\n)\*/', '$1// pwci-devlobby'
+          $s = $s -replace '//(locked->PopGameList\( infos \);)', '$1 // pwci-devlobby'
+          if ($s -eq $before) { throw "SelectGameModeScreen.cpp: neither RefreshGamesList nor PopGameList matched" }
+          [System.IO.File]::WriteAllText((Resolve-Path $f), $s)
+          Select-String -Path $f -Pattern "pwci-devlobby|RefreshGamesList|PopGameList" | ForEach-Object { "SGMS: " + $_.Line }
 
       - name: Locate mt.exe from runner Windows Kits
         shell: pwsh
@@ -350,7 +385,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: PrimeWorld-DevLogin
+          name: PrimeWorld-DevLobby
           path: |
             build/PrimeWorld.exe
             build/PrimeWorld.pdb
