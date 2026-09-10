@@ -21,7 +21,8 @@
 #   implements it). UniServerApp simply does not contain Terrain / Scene / PF_GameLogic:
 #   the component graph resolves to ~640 sources, of which exactly one is in PF_GameLogic.
 #
-# STATUS: exploratory. This has never linked.
+# STATUS: builds and links. Run 34430397670 compiled 646 TUs with no errors and produced
+# UniServerApp.exe (4.85 MB, console subsystem). The binary has never been run.
 
 # ---------------------------------------------------------------------------------------
 # 1. Target name.

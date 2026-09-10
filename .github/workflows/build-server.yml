@@ -1,6 +1,6 @@
 name: build-server
 
-# Prime World server (UniServerApp). Exploratory: this has never linked.
+# Prime World server (UniServerApp). Builds and links since run 34430397670; never run.
 # Same VC9 toolchain and the same C:\vc9 cache key as build-client, so the two share the cache.
 # workflow_dispatch only - no nightly cron until it builds.
 
@@ -362,6 +362,7 @@ jobs:
             Write-Host "=== first 60 errors ==="; Get-Content "$dst/errors.txt" -TotalCount 60 -ErrorAction SilentlyContinue
           }
           Get-ChildItem build -Filter *.exe -ErrorAction SilentlyContinue | ForEach-Object { "EXE: $($_.Name) $($_.Length)" }
+          if (-not (Test-Path build/UniServerApp.exe)) { Write-Host "NOTE: no UniServerApp.exe produced" }
 
       - name: Upload artifact
         if: always()
