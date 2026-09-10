@@ -357,6 +357,29 @@ jobs:
           [System.IO.File]::WriteAllText((Resolve-Path $f), $s)
           Select-String -Path $f -Pattern "pwci-devlobby|RefreshGamesList|PopGameList" | ForEach-Object { "SGMS: " + $_.Line }
 
+      - name: Patch LoginClient.cpp (trust the relay address the cluster sent)
+        shell: pwsh
+        run: |
+          # Why every client ended up dialling 127.0.0.1 for the relay: the community added
+          # ReplaceIpWithServerIp(), which throws away the IP the Login service just handed out
+          # and splices in SERVER_IP_ARRAY[usedServer] from server_ip.h, keeping only the port.
+          # server_ip.h is the community's own secret and is not published, so this build uses the
+          # all-127.0.0.1 stub from the CMake patch step above - which is exactly the address the
+          # client then tried, no matter what the cluster reported. Nival's original code has no
+          # such rewrite. Drop it at the two call sites and use the address as received; that is
+          # what a self-hosted cluster on a LAN needs, and it removes the local port-forwarder.
+          $f = "game/pw/branches/r1117/Src/Network/LoginClient.cpp"
+          if (-not (Test-Path $f)) { throw "no Network/LoginClient.cpp" }
+          $s = [System.IO.File]::ReadAllText((Resolve-Path $f))
+          $before = $s
+          $s = $s.Replace('*baseRelayAddress = ReplaceIpWithServerIp(resultMsg.relayAddress);', '*baseRelayAddress = resultMsg.relayAddress; // pwci-relaydirect')
+          $s = $s.Replace('*secondaryRelayAddress = ReplaceIpWithServerIp(resultMsg.secondaryRelayAddress);', '*secondaryRelayAddress = resultMsg.secondaryRelayAddress; // pwci-relaydirect')
+          if ($s -eq $before) { throw "LoginClient.cpp: ReplaceIpWithServerIp call sites not found" }
+          # the helper is now unused; keep the compiler quiet about the static function
+          $s = $s.Replace('static Network::NetAddress ReplaceIpWithServerIp(Network::NetAddress& frontendAddress)', '#pragma warning( disable: 4505 ) // pwci-relaydirect' + "`r`n" + 'static Network::NetAddress ReplaceIpWithServerIp(Network::NetAddress& frontendAddress)')
+          [System.IO.File]::WriteAllText((Resolve-Path $f), $s)
+          Select-String -Path $f -Pattern "pwci-relaydirect" | ForEach-Object { "LOGINCLIENT: " + $_.Line }
+
       - name: Locate mt.exe from runner Windows Kits
         shell: pwsh
         run: |
