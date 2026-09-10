@@ -1,0 +1,359 @@
+name: build-client-dev
+
+# Copy of build-client plus one extra patch step: a command-line login path
+# (-dev_login <name>) that bypasses the community web launcher, so the client can
+# log in to a self-hosted UniServerApp cluster. Same VC9 toolchain and the same
+# C:\vc9 cache key (vc9-wdk71-v7) as build-client and build-server.
+#
+# workflow_dispatch alone is unusable while this file lives outside the default
+# branch: GitHub registers dispatchable workflows only from the default branch.
+# The push trigger is scoped to this one branch and exists purely so runs can be
+# started at all. Drop it (leaving workflow_dispatch) if this ever lands on main.
+# No cron: build-client on main still does the nightly.
+
+on:
+  workflow_dispatch:
+    inputs:
+      extra_defs:
+        description: "Extra compile definitions, e.g. -D_SHIPPING -DUSE_DEVELOPER_COMMANDS"
+        required: false
+        default: ""
+  push:
+    branches:
+      - client-dev-login
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 150
+    env:
+      SRC_REPO: Prime-World-Classic/prime-world-classic
+      R1117: pw/branches/r1117
+    steps:
+      - name: Checkout pw-ci (stubs, cmake snippets)
+        uses: actions/checkout@v4
+
+      - name: Checkout game sources (sparse, LFS)
+        uses: actions/checkout@v4
+        with:
+          repository: Prime-World-Classic/prime-world-classic
+          path: game
+          lfs: true
+          sparse-checkout: |
+            pw/branches/r1117/Src
+            pw/branches/r1117/Vendor
+            pw/branches/r1117/Tools
+            pw/branches/r1117/Data/GameLogic
+          sparse-checkout-cone-mode: true
+
+      - name: Cache VC9 toolchain
+        id: vc9cache
+        uses: actions/cache@v4
+        with:
+          path: C:\vc9
+          key: vc9-wdk71-v7
+
+      - name: Cache ISOs
+        if: steps.vc9cache.outputs.cache-hit != 'true'
+        id: isocache
+        uses: actions/cache@v4
+        with:
+          path: C:\iso
+          key: iso-wdk-express-v2
+
+      - name: Download WDK 7.1 ISO
+        if: steps.vc9cache.outputs.cache-hit != 'true' && steps.isocache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path C:\iso | Out-Null
+          $ok=$false
+          foreach ($i in 1..4) {
+            try { Invoke-WebRequest -Uri "https://archive.org/download/grmwdk-en-7600-1/GRMWDK_EN_7600_1.ISO" -OutFile C:\iso\WDK71.iso -TimeoutSec 3000; $ok=$true; break }
+            catch { Write-Host "attempt $i failed: $($_.Exception.Message)"; Start-Sleep -Seconds (30*$i) }
+          }
+          if (-not $ok) { throw "WDK ISO download failed after retries" }
+          $ok=$false
+          foreach ($i in 1..4) {
+            try { Invoke-WebRequest -Uri "https://archive.org/download/vs-2008-express-with-sp-1-esnx-1504732/VS2008ExpressWithSP1ESNx1504732.iso" -OutFile C:\iso\VS2008Express.iso -TimeoutSec 4000; $ok=$true; break }
+            catch { Write-Host "attempt $i failed: $($_.Exception.Message)"; Start-Sleep -Seconds (30*$i) }
+          }
+          if (-not $ok) { throw "Express ISO download failed after retries" }
+          $ok=$false
+          foreach ($i in 1..4) {
+            try { Invoke-WebRequest -Uri "https://archive.org/download/grmsdkx-en-dvd/GRMSDK_EN_DVD.iso" -OutFile C:\iso\GRMSDK.iso -TimeoutSec 3000; $ok=$true; break }
+            catch { Write-Host "attempt $i failed"; Start-Sleep -Seconds (30*$i) }
+          }
+          if (-not $ok) { throw "GRMSDK ISO download failed after retries" }
+
+      - name: Extract VC9 toolchain from WDK ISO (lessmsi)
+        if: steps.vc9cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          choco install lessmsi -y --no-progress | Select-Object -Last 1
+          $m = Mount-DiskImage -ImagePath C:\iso\WDK71.iso -PassThru
+          $d = ($m | Get-Volume).DriveLetter
+          Write-Host "=== WDK ISO root:"; Get-ChildItem "$d`:\" | ForEach-Object Name
+          Write-Host "=== msi list:"; Get-ChildItem "$d`:\" -Recurse -Filter *.msi -ErrorAction SilentlyContinue | ForEach-Object { "$($_.FullName) $([math]::Round($_.Length/1MB,1))MB" }
+          New-Item -ItemType Directory -Force -Path C:\wdkx | Out-Null
+          Get-ChildItem "$d`:\" -Recurse -Filter *.msi -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -match "vctools|headers|libs|build|kittools|crt" } |
+            ForEach-Object {
+              Write-Host ">>> lessmsi x $($_.Name)"
+              & "C:\ProgramData\chocolatey\bin\lessmsi.exe" x $_.FullName "C:\wdkx\$($_.BaseName)\" | Select-Object -Last 1
+            }
+          Write-Host "=== cl.exe candidates:"
+          Get-ChildItem C:\wdkx -Recurse -Filter cl.exe -ErrorAction SilentlyContinue | ForEach-Object FullName
+          Write-Host "=== include dirs:"
+          Get-ChildItem C:\wdkx -Recurse -Directory -Include inc,crt,api -ErrorAction SilentlyContinue | Select-Object -First 15 | ForEach-Object FullName
+          $cl = Get-ChildItem C:\wdkx -Recurse -Filter cl.exe -ErrorAction SilentlyContinue | Where-Object { $_.FullName -match "\\x86\\" -and $_.FullName -notmatch "amd64|ia64" } | Select-Object -First 1
+          if (-not $cl) { $cl = Get-ChildItem C:\wdkx -Recurse -Filter cl.exe -ErrorAction SilentlyContinue | Select-Object -First 1 }
+          if (-not $cl) { throw "no cl.exe in WDK extraction — see listings" }
+          # staged layout: C:\vc9\bin (компилятор+вспом.), C:\vc9\inc..., C:\vc9\lib...
+          New-Item -ItemType Directory -Force -Path C:\vc9 | Out-Null
+          Copy-Item -Recurse -Force (Split-Path (Split-Path $cl.FullName)) C:\vc9\bin
+          $incApi = Get-ChildItem C:\wdkx -Recurse -Directory -Filter api | Where-Object { Test-Path (Join-Path $_.FullName "windows.h") } | Select-Object -First 1
+          $incCrt = Get-ChildItem C:\wdkx -Recurse -Directory -Filter crt | Where-Object { Test-Path (Join-Path $_.FullName "stdio.h") } | Select-Object -First 1
+          if ($incApi) { Copy-Item -Recurse -Force $incApi.FullName C:\vc9\inc_api }
+          if ($incCrt) { Copy-Item -Recurse -Force $incCrt.FullName C:\vc9\inc_crt }
+          $libDirs = Get-ChildItem C:\wdkx -Recurse -Directory -Filter i386 -ErrorAction SilentlyContinue | ForEach-Object FullName
+          Write-Host "=== i386 lib dirs:"; $libDirs
+          $libWin = $libDirs | Where-Object { $_ -match "libs_x86fre" -and $_ -match "\\lib\\win7\\" } | Select-Object -First 1
+          if (-not $libWin) { $libWin = $libDirs | Where-Object { $_ -match "win7|wnet|wlh" } | Select-Object -First 1 }
+          Write-Host "libWin choice: $libWin"; Get-ChildItem $libWin -Filter kernel32.lib | ForEach-Object FullName
+          $libCrt = $libDirs | Where-Object { $_ -match "[Cc]rt" } | Select-Object -First 1
+          if ($libWin) { Copy-Item -Recurse -Force $libWin C:\vc9\lib_win }
+          if ($libCrt) { Copy-Item -Recurse -Force $libCrt C:\vc9\lib_crt }
+          # ATL для WTL
+          $incAtl = Get-ChildItem C:\wdkx -Recurse -Directory -Filter atl71 -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($incAtl) { Copy-Item -Recurse -Force $incAtl.FullName C:\vc9\inc_atl }
+          $atls = Get-ChildItem C:\wdkx -Recurse -Filter atls.lib -ErrorAction SilentlyContinue | Where-Object { $_.FullName -match "\\i386\\" } | Select-Object -First 1
+          if ($atls) { Copy-Item -Recurse -Force $atls.DirectoryName C:\vc9\lib_atl; Write-Host "lib_atl from: $($atls.DirectoryName)" } else { Write-Host "WARN: no i386 atls.lib" }
+          # --- VC9 STL + sal.h из VS2008 Express ---
+          $m2 = Mount-DiskImage -ImagePath C:\iso\VS2008Express.iso -PassThru
+          $d2 = ($m2 | Get-Volume).DriveLetter
+          New-Item -ItemType Directory -Force -Path C:\vcx | Out-Null
+          & 7z x -y "-oC:\vcx\Ixpvc" "$d2`:\VCExpress\Ixpvc.exe" | Select-Object -Last 1
+          & "C:\ProgramData\chocolatey\bin\lessmsi.exe" x "C:\vcx\Ixpvc\vs_setup.msi" "C:\vsx\" | Select-Object -Last 1
+          $inc = Get-ChildItem C:\vsx -Recurse -Directory -Filter include | Where-Object { Test-Path (Join-Path $_.FullName "algorithm") } | Select-Object -First 1
+          if (-not $inc) { throw "no VC include (algorithm) in Express extraction" }
+          Copy-Item -Recurse -Force $inc.FullName C:\vc9\inc_stl
+          $vclib = Get-ChildItem C:\vsx -Recurse -Directory -Filter lib | Where-Object { Test-Path (Join-Path $_.FullName "msvcrt.lib") } | Select-Object -First 1
+          if ($vclib) { Copy-Item -Recurse -Force $vclib.FullName C:\vc9\lib_vc }
+          # полный Win32 Include из SDK 7.1
+          $m3 = Mount-DiskImage -ImagePath C:\iso\GRMSDK.iso -PassThru
+          $d3 = ($m3 | Get-Volume).DriveLetter
+          & "C:\ProgramData\chocolatey\bin\lessmsi.exe" x "$d3`:\Setup\WinSDKBuild\WinSDKBuild_x86.msi" "C:\sdkb\" | Select-Object -Last 1
+          & "C:\ProgramData\chocolatey\bin\lessmsi.exe" x "$d3`:\Setup\WinSDKInterop\WinSDKInterop_x86.msi" "C:\sdki\" | Select-Object -Last 1
+          $sdkinc2 = Get-ChildItem C:\sdkb,C:\sdki -Recurse -Directory -Filter Include -ErrorAction SilentlyContinue | Where-Object { Test-Path (Join-Path $_.FullName "TlHelp32.h") } | Select-Object -First 1
+          if (-not $sdkinc2) { $sdkinc2 = Get-ChildItem C:\sdkb,C:\sdki -Recurse -Directory -Filter Include -ErrorAction SilentlyContinue | Select-Object -First 1 }
+          if ($sdkinc2) { Copy-Item -Recurse -Force $sdkinc2.FullName C:\vc9\inc_sdk; Write-Host "inc_sdk from: $($sdkinc2.FullName)" }
+          Get-ChildItem C:\vc9\inc_sdk -Filter *elp32* -ErrorAction SilentlyContinue | ForEach-Object Name
+          $sdklib = Get-ChildItem C:\sdkb,C:\sdki -Recurse -Directory -Filter Lib -ErrorAction SilentlyContinue | Where-Object { Test-Path (Join-Path $_.FullName "DbgHelp.lib") } | Select-Object -First 1
+          if ($sdklib) { Copy-Item -Recurse -Force $sdklib.FullName C:\vc9\lib_sdk; Write-Host "lib_sdk from: $($sdklib.FullName)" } else { Write-Host "WARN: no SDK Lib with DbgHelp.lib" }
+          Write-Host "=== staged:"; Get-ChildItem C:\vc9 | ForEach-Object Name; Get-ChildItem C:\vc9\bin | Select-Object -First 40 | ForEach-Object Name
+          Dismount-DiskImage -ImagePath C:\iso\WDK71.iso
+          Dismount-DiskImage -ImagePath C:\iso\VS2008Express.iso
+          Dismount-DiskImage -ImagePath C:\iso\GRMSDK.iso
+
+      - name: Install jom + portable CMake 3.16
+        shell: pwsh
+        run: |
+          Invoke-WebRequest https://download.qt.io/official_releases/jom/jom.zip -OutFile jom.zip
+          Expand-Archive jom.zip -DestinationPath C:\jom -Force
+          Invoke-WebRequest https://github.com/Kitware/CMake/releases/download/v3.16.9/cmake-3.16.9-win64-x64.zip -OutFile cmake.zip
+          Expand-Archive cmake.zip -DestinationPath C:\cmake316 -Force
+
+      - name: Patch CMakeLists (drop files absent from published tree)
+        shell: pwsh
+        run: |
+          $cml = "game/pw/branches/r1117/Src/CMakeLists.txt"
+          $src = "game/pw/branches/r1117/Src"
+          (Get-Content $cml) -replace [regex]::Escape('file( GLOB_RECURSE ALL_SRCS *.cpp *.c )'), "file( GLOB_RECURSE ALL_SRCS *.cpp *.c )`nlist_remove_regexp( ALL_SRCS `".+/PF/Tools/.+`" )`nlist_remove_regexp( ALL_SRCS `".+/Network/LoginServerSync\\.cpp`" )`nlist_remove_regexp( ALL_SRCS `".+/Network/LoginServerBase\\.cpp`" )`nlist_remove_regexp( ALL_SRCS `".+\\.xtest\\.cpp$`" )`nlist_remove_regexp( ALL_SRCS `".+\\.testbad\\.cpp$`" )`nlist_remove_regexp( ALL_SRCS `".+\\.test[0-9a-z]*\\.cpp$`" )`nlist_remove_regexp( ALL_SRCS `".+/WorldCreator\\.cpp$`" )`nlist_remove_regexp( ALL_SRCS `".+/AdventureScriptMachine\\.cpp$`" )`nlist_remove_regexp( ALL_SRCS `".+/PF_Minigames/Clinic.*\\.cpp$`" )`nlist_remove_regexp( ALL_SRCS `".+/PF_Minigames/CreepStates\\.cpp$`" )`nlist_remove_regexp( ALL_SRCS `".+/PF_Minigames/DBClinic\\.cpp$`" )`nlist_remove_regexp( ALL_SRCS `".+/PWClassic_Sandbox/.+`" )`nlist_remove_regexp( ALL_SRCS `".+/Server/Relay/.+`" )`nlist_remove_regexp( ALL_SRCS `".+/Server/UserManager/.+`" )`nlist_remove_regexp( ALL_SRCS `".+/Server/Monitoring/MonitoringSvc/.+`" )`nlist_remove_regexp( ALL_SRCS `".+/Server/WebServer/.+`" )`nlist_remove_regexp( ALL_SRCS `".+/System/BlockData/src/.+`" )`nlist_remove_regexp( ALL_SRCS `".+/System/Node/.+\\.cpp$`" )`nlist_remove_regexp( ALL_SRCS `".+/StarForce_test\\.cpp$`" )`nlist_remove_regexp( ALL_SRCS `".+/(RdpTestApp|UdpTest|AsyncInvokerTest|FileUnpile)\\.cpp$`" )`nlist_remove_regexp( ALL_SRCS `".+Linux\\.cpp$`" )`nlist_remove_regexp( ALL_SRCS `".+/DBServer\\.auto\\.cpp$`" )`nlist_remove_regexp( ALL_SRCS `".+/CMakeFiles/.+`" )" | Set-Content $cml
+          (Get-Content $cml) -replace [regex]::Escape('include_directories( ${SRC_DIR}/Server/NetworkAIO )'), "include_directories( `${SRC_DIR}/Server/NetworkAIO )`ninclude_directories( `${SRC_DIR}/Server/Chat )`ninclude_directories( `${VENDOR}/JsonCpp/include )`ninclude_directories( `${VENDOR}/boost )`ninclude_directories( `${VENDOR}/libcurl/include )`ninclude_directories( `${VENDOR}/tinyxml )`ninclude_directories( `${VENDOR}/pthreads/Pre-built.2/include )" | Set-Content $cml
+          $lines = Get-Content $cml
+          $out = foreach ($l in $lines) {
+            if ($l -match 'set\( ALL_SRCS \$\{ALL_SRCS\} \$\{SRC_DIR\}(/[^ ]+) \)') {
+              $rel = $Matches[1]
+              $full = Join-Path $src $rel.TrimStart('/')
+              if (-not (Test-Path $full)) { "# ABSENT: $l"; continue }
+            }
+            $l
+          }
+          # то же для vendor-либ: simple_add_library( [optimized|debug] ${VENDOR}/path )
+          $vendor = "game/pw/branches/r1117/Vendor"
+          $out2 = foreach ($l in $out) {
+            if ($l -match 'simple_add_library\(\s*(optimized\s+|debug\s+)?\$\{VENDOR\}(/[^ )]+)\s*\)') {
+              $rel = $Matches[2]
+              $full = Join-Path $vendor ($rel.TrimStart('/') + ".lib")
+              if (-not (Test-Path $full)) { "# ABSENTLIB: $l"; continue }
+            }
+            $l
+          }
+          Set-Content $cml $out2
+          # стаб вместо вырезанного server_ip.h (секрет сообщества, не нужен для оффлайна)
+          $sip = "game/pw/branches/r1117/Src/PW_Game/server_ip.h"
+          if (-not (Test-Path $sip)) {
+            $stub = "#pragma once`n" +
+              "static const wchar_t* SERVER_IP_W_ARRAY[] = { L`"127.0.0.1`", L`"127.0.0.1`", L`"127.0.0.1`", L`"127.0.0.1`" };`n" +
+              "static const char*    SERVER_IP_ARRAY[]   = { `"127.0.0.1`", `"127.0.0.1`", `"127.0.0.1`", `"127.0.0.1`" };`n" +
+              "#define SERVER_IP `"127.0.0.1`"`n" +
+              "#define MIRROR_SERVER_IP `"127.0.0.1`"`n" +
+              "#define SERVER_PROXY_IP `"127.0.0.1`"`n" +
+              "#define SERVER_PORT `"34999`"`n" +
+              "#define LOGIN_PORT `"36615`"`n" +
+              "#define SERVER_CLUSTER_PORT_BACK 35000`n" +
+              "#define SERVER_CLUSTER_PORT_FRONT 35001`n" +
+              "#define SYNCHRONIZER_PORT 34999`n" +
+              "extern int usedServer;`n" +
+              "#define SERVER_IP_W L`"127.0.0.1`"`n" +
+              "#define SESSION_TOKEN `"offline`"`n" +
+              "#define API_KEY `"offline`"`n"
+            Set-Content $sip $stub
+            Write-Host "stubbed server_ip.h"
+          }
+          # стабы Steamworks (редистрибуция SDK запрещена; клиенту оффлайн Steam не нужен)
+          $stdir = "game/pw/branches/r1117/Src/steam"
+          if (-not (Test-Path $stdir)) {
+            New-Item -ItemType Directory -Force -Path $stdir | Out-Null
+            $api = "#pragma once`n" +
+              "inline bool SteamAPI_Init() { return false; }`n" +
+              "inline void SteamAPI_Shutdown() {}`n" +
+              "inline void SteamAPI_RunCallbacks() {}`n" +
+              "inline bool SteamAPI_RestartAppIfNecessary(unsigned) { return false; }`n" +
+              "enum ENotificationPosition { k_EPositionTopLeft, k_EPositionTopRight, k_EPositionBottomLeft, k_EPositionBottomRight };`n" +
+              "struct ISteamUtilsStub { void SetOverlayNotificationPosition(ENotificationPosition) {} };`n" +
+              "inline ISteamUtilsStub* SteamUtils() { static ISteamUtilsStub s; return &s; }`n"
+            Set-Content "$stdir/steam_api.h" $api
+            foreach ($h in @("isteamuserstats.h","isteamremotestorage.h","isteammatchmaking.h","steam_gameserver.h")) {
+              Set-Content "$stdir/$h" "#pragma once`n"
+            }
+            Write-Host "stubbed steam headers"
+          }
+          # точечные фиксы инклудов (файлы лежат уровнем выше)
+          $tb = "game/pw/branches/r1117/Src/System/Node/TextBuffer.h"
+          if (Test-Path $tb) { (Get-Content $tb) -replace '#include "StrUtils.h"', '#include "../StrUtils.h"' | Set-Content $tb }
+          $fu = "game/pw/branches/r1117/Src/System/FileSystem/FileUnpile.cpp"
+          if (Test-Path $fu) {
+            (Get-Content $fu) -replace '#include "systemStdAfx.h"', '#include "../systemStdAfx.h"' -replace '#include "SystemLog.h"', '#include "../SystemLog.h"' | Set-Content $fu
+          }
+          # ThreadLocal.cpp объявляет NT-структуры, которые SDK 7.1 winternl.h уже даёт — переименуем локальные
+          $tl = "game/pw/branches/r1117/Src/System/ThreadLocal.cpp"
+          if (Test-Path $tl) {
+            (Get-Content $tl) -replace 'PEB_LDR_DATA', 'PW_PEB_LDR_DATA' -replace 'RTL_USER_PROCESS_PARAMETERS', 'PW_RTL_USER_PROCESS_PARAMETERS' | Set-Content $tl
+          }
+          # наши стабы + cmake-сниппет с довключением вырезанных исходников и либ
+          $sd = "$src/Game/PF/Server/Statistic/StatClientDiskDispatcher.cpp"
+          if (Test-Path $sd) { (Get-Content $sd) -replace '#include "StatClientDiskDispatcher.h"', "#include `"StatClientDiskDispatcher.h`"`n#include `"System/FileSystem/FilePath.h`"" | Set-Content $sd }
+          Copy-Item stubs/pwci_stubs.cpp "$src/pwci_stubs.cpp"
+          $snip = (Resolve-Path cmake/pwci_extra.cmake).Path -replace '\\','/'
+          (Get-Content $cml) -replace [regex]::Escape('#print_list( ALL_SRCS )'), "include( `"$snip`" )`n#print_list( ALL_SRCS )" | Set-Content $cml
+          # вернуть в сборку то, что Нивал исключил, а клиент линкует
+          (Get-Content $cml) | Where-Object { ($_ -notlike '*PFResourcesCollection*') -and ($_ -notlike '*/MD\\.cpp*') } | Set-Content $cml
+          Select-String -Path $cml -Pattern "ABSENT" | ForEach-Object Line
+          # фикс бага сообщества: пропущенная ; в ClientDispatchVisibilityHelper.cpp
+          $cdvh = "game/pw/branches/r1117/Src/PF_GameLogic/ClientDispatchVisibilityHelper.cpp"
+          if (Test-Path $cdvh) {
+            (Get-Content $cdvh) -replace 'EnableRender\(_visible\)$', 'EnableRender(_visible);' | Set-Content $cdvh
+          }
+          # DBStats.h полагается на PCH для StringExecutor.h — добавим инклуд
+          $dbst = "game/pw/branches/r1117/Src/PF_GameLogic/DBStats.h"
+          if ((Test-Path $dbst) -and -not (Select-String -Path $dbst -Pattern "StringExecutor.h" -Quiet)) {
+            (Get-Content $dbst) -replace [regex]::Escape('#include "../Terrain/DBTerrain.h"'), "#include `"../Terrain/DBTerrain.h`"`n#include `"StringExecutor.h`"" | Set-Content $dbst
+          }
+          # Оффлайн-запуск (Nival-флоу): сообщество закомментировало local_game и вставило
+          # обязательный лаунчер-протокол между созданием контекста и context->Start().
+          # Возвращаем переменную и обходим блок лаунчера, когда local_game/replay.
+          $gcpp = "game/pw/branches/r1117/Src/PW_Client/Game.cpp"
+          if ((Test-Path $gcpp) -and -not (Select-String -Path $gcpp -Pattern "pwci-local" -Quiet)) {
+            $g = [System.IO.File]::ReadAllText((Resolve-Path $gcpp))
+            $g = $g.Replace('//REGISTER_DEV_VAR( "local_game", s_localGame, STORAGE_NONE);', 'REGISTER_DEV_VAR( "local_game", s_localGame, STORAGE_NONE);')
+            $g = $g.Replace('  std::string linuxRun = CmdLineLite::Instance().GetStringKey( "linux", "" );', "  if ( s_localGame || isReplay ) { context->Start(); } else { // pwci-local`n  std::string linuxRun = CmdLineLite::Instance().GetStringKey( `"linux`", `"`" );")
+            $g = $g.Replace('  mainVars.initContext = true;', "  } // pwci-local`n  mainVars.initContext = true;")
+            [System.IO.File]::WriteAllText((Resolve-Path $gcpp), $g)
+            Select-String -Path $gcpp -Pattern "pwci-local|local_game" | ForEach-Object { "GAMECPP: " + $_.Line }
+          }
+          # _SHIPPING + USE_DEVELOPER_COMMANDS: два REGISTER_DEV_CMD ссылаются на функции под #ifndef _SHIPPING
+          $asl = "game/pw/branches/r1117/Src/PF_GameLogic/AdventureScreenLogic.cpp"
+          if ((Test-Path $asl) -and -not (Select-String -Path $asl -Pattern "pwci-shipping" -Quiet)) {
+            $a = [System.IO.File]::ReadAllText((Resolve-Path $asl))
+            $a = $a.Replace("REGISTER_DEV_CMD( debug_talents_award, TalentsAward );", "#ifndef _SHIPPING // pwci-shipping`nREGISTER_DEV_CMD( debug_talents_award, TalentsAward );")
+            $a = $a.Replace("REGISTER_DEV_CMD( debug_choose_party_again, ChoosePartyAgain);", "REGISTER_DEV_CMD( debug_choose_party_again, ChoosePartyAgain);`n#endif // pwci-shipping")
+            [System.IO.File]::WriteAllText((Resolve-Path $asl), $a)
+          }
+
+      - name: Patch Game.cpp for command-line login (-dev_login)
+        shell: pwsh
+        run: |
+          # Runs after the offline/launcher patch above and reuses its marker line as the
+          # anchor, so the two patches compose instead of fighting over the same block.
+          $gcpp = "game/pw/branches/r1117/Src/PW_Client/Game.cpp"
+          if (-not (Test-Path $gcpp)) { throw "no PW_Client/Game.cpp" }
+          if (Select-String -Path $gcpp -Pattern "pwci-devlogin" -Quiet) { Write-Host "already patched"; exit 0 }
+          $anchor = '  if ( s_localGame || isReplay ) { context->Start(); } else { // pwci-local'
+          $repl = @'
+            // pwci-devlogin: launcher-free login for a self-hosted cluster.
+            //   -dev_login <name>      log in under <name> at login_address (game.cfg / private.cfg)
+            //   -session_login <key>   session key handed to GameContext (empty is fine: the running
+            //                          Login service is Coordinator/SimpleLoginProcessor, which accepts
+            //                          any login and mints a user id; only the RDP newlogin service
+            //                          checks session keys, and it stays suspended without RDP)
+            //   -dev_login_tab 1       prepend the TAB that the community web-launcher flow puts in
+            //                          front of the nickname (ClientAuth::DevAuth compares login+1)
+            const char * pwciDevLogin = CmdLineLite::Instance().GetStringKey( "-dev_login", "" );
+            if ( s_localGame || isReplay ) { context->Start(); }
+            else if ( pwciDevLogin && pwciDevLogin[0] )
+            {
+              std::string pwciLogin( pwciDevLogin );
+              if ( CmdLineLite::Instance().GetIntKey( "-dev_login_tab", 0 ) )
+                pwciLogin = std::string( "\t" ) + pwciLogin;
+              const char * pwciSess = sessLogin ? sessLogin : "";
+              const char * pwciMapId = CmdLineLite::Instance().GetStringKey( "mapId", "" );
+              g_devLogin = pwciLogin.c_str();
+              g_sessionToken = pwciSess;
+              systemLog( NLogg::LEVEL_MESSAGE ) << "pwci-devlogin: login=[" << pwciLogin.c_str() << "] session=[" << pwciSess << "]" << endl;
+              context = new Game::GameContext( pwciSess, g_devLogin.c_str(), pwciMapId, socialServer, guildEmblem, isSpectator, false );
+              context->Start();
+            }
+            else { // pwci-local
+          '@
+          $g = [System.IO.File]::ReadAllText((Resolve-Path $gcpp))
+          if (-not $g.Contains($anchor)) { throw "pwci-local anchor missing - the offline patch step must run first" }
+          $g = $g.Replace($anchor, $repl)
+          [System.IO.File]::WriteAllText((Resolve-Path $gcpp), $g)
+          Select-String -Path $gcpp -Pattern "pwci-devlogin" | ForEach-Object { "GAMECPP: " + $_.Line }
+
+      - name: Locate mt.exe from runner Windows Kits
+        shell: pwsh
+        run: |
+          $mt = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" -Recurse -Filter mt.exe -ErrorAction SilentlyContinue | Where-Object { $_.FullName -match "\\x86\\" } | Select-Object -First 1
+          if (-not $mt) { throw "no mt.exe on runner" }
+          Write-Host "mt: $($mt.FullName)"
+          "MT_DIR=$($mt.DirectoryName)" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+
+      - name: Configure and build (Release)
+        shell: cmd
+        run: |
+          set "PATH=C:\vc9\bin\x86;C:\vc9\bin;C:\jom;C:\cmake316\cmake-3.16.9-win64-x64\bin;%MT_DIR%;%PATH%"
+          set "INCLUDE=C:\vc9\inc_stl;C:\vc9\inc_crt;C:\vc9\inc_api;C:\vc9\inc_sdk;C:\vc9\inc_atl"
+          dir C:\vc9\lib_atl /s /b | findstr /i atls
+          set "LIB=C:\vc9\lib_vc;C:\vc9\lib_crt;C:\vc9\lib_win;C:\vc9\lib_sdk;C:\vc9\lib_atl;C:\vc9\lib_atl\i386"
+          cl 2>&1 | findstr /i version
+          if errorlevel 1 echo cl probe nonzero (ok)
+          mkdir build
+          cd build
+          where mt.exe rc.exe cvtres.exe 2>nul
+          cmake -G "NMake Makefiles JOM" "%GITHUB_WORKSPACE%\game\pw\branches\r1117\Src" -DCMAKE_BUILD_TYPE=Release -DCMAKE_TRY_COMPILE_CONFIGURATION=Release "-DCMAKE_C_FLAGS_DEBUG=/Od" "-DCMAKE_CXX_FLAGS_DEBUG=/Od" "-DCMAKE_C_FLAGS_RELEASE=/MD /O2 /Ob2 /DNDEBUG /Z7" "-DCMAKE_CXX_FLAGS_RELEASE=/MD /O2 /Ob2 /DNDEBUG /Z7" "-DCMAKE_EXE_LINKER_FLAGS_RELEASE=/DEBUG /MAP /OPT:REF /OPT:ICF /INCREMENTAL:NO /LARGEADDRESSAWARE" "-DPWCI_EXTRA_DEFS=${{ github.event.inputs.extra_defs }}"
+          if errorlevel 1 ( type CMakeFiles\CMakeError.log & exit /b 2 )
+          jom /J 4
+
+      - name: Upload artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: PrimeWorld-DevLogin
+          path: |
+            build/PrimeWorld.exe
+            build/PrimeWorld.pdb
+            build/PrimeWorld.map
+            build/*.dll
+          if-no-files-found: warn
