@@ -322,8 +322,8 @@ jobs:
               const int pwciDevLobby = CmdLineLite::Instance().GetIntKey( "-dev_lobby", ( pwciMapId && pwciMapId[0] ) ? 0 : 1 );
               if ( pwciDevLobby )
                 g_sessionStatus = WebLauncherPostRequest::RegisterInSessionRequest_Error;
-              extern bool g_pwciDevLobby; // pwci-relobby: GameContext must know no launcher will respawn us
-              g_pwciDevLobby = pwciDevLobby ? true : false;
+              extern bool g_pwciNoLauncher; // pwci-relobby: GameContext must know no launcher will respawn us
+              g_pwciNoLauncher = true;
               g_devLogin = pwciLogin.c_str();
               g_sessionToken = pwciSess;
               systemLog( NLogg::LEVEL_MESSAGE ) << "pwci-devlogin: login=[" << pwciLogin.c_str() << "] session=[" << pwciSess << "] lobby=" << pwciDevLobby << endl;
@@ -385,8 +385,8 @@ jobs:
           REGISTER_VAR( "rdp_base_port", s_base_udp_port , STORAGE_NONE );
 
           // pwci-relobby: state for the launcher-free return to the lobby.
-          // g_pwciDevLobby is set from Game.cpp when -dev_lobby is on; dev_relobby is the switch.
-          bool g_pwciDevLobby = false;
+          // g_pwciNoLauncher is set from Game.cpp on any -dev_login start; dev_relobby is the switch.
+          bool g_pwciNoLauncher = false;
           static bool s_pwciRelobbyPending = false;
           static int s_pwci_relobby = 1;
           REGISTER_VAR( "dev_relobby", s_pwci_relobby, STORAGE_NONE );
@@ -428,7 +428,7 @@ jobs:
           $a3 = '    status = EContextStatus::Cleanup;'
           $r3 = @'
               // pwci-relobby: no launcher will respawn us, so have Poll() log back into the lobby
-              if ( g_pwciDevLobby && s_pwci_relobby && !fastReconnectCtx )
+              if ( g_pwciNoLauncher && s_pwci_relobby && !fastReconnectCtx )
                 s_pwciRelobbyPending = true;
 
               status = EContextStatus::Cleanup;
@@ -438,7 +438,7 @@ jobs:
           $a4 = '    networkStatusScreen->SetFastReconnectTryIndex( 0 );'
           $r4 = @'
               networkStatusScreen->SetFastReconnectTryIndex( 0 );
-              if ( g_pwciDevLobby && s_pwci_relobby ) // pwci-relobby
+              if ( g_pwciNoLauncher && s_pwci_relobby ) // pwci-relobby
                 s_pwciRelobbyPending = true;
           '@
 
