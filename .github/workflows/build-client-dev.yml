@@ -390,12 +390,39 @@ jobs:
           static bool s_pwciRelobbyPending = false;
           static int s_pwci_relobby = 1;
           REGISTER_VAR( "dev_relobby", s_pwci_relobby, STORAGE_NONE );
+          // How long to stay on the finished battle screen before going back. The default is just
+          // past the game server's own 'play same team' window (~35 s), so the normal end-of-match
+          // flow - awards, play-same-team offer - runs to completion and we only step in after it.
+          static float s_pwci_relobby_delay = 40.0f;
+          REGISTER_VAR( "dev_relobby_delay", s_pwci_relobby_delay, STORAGE_NONE );
+          static float s_pwciRelobbyWait = 40.0f;
           '@
 
           # 2. the re-login itself, one Poll after Cleanup() has run
           $a2 = '  PollFastReconnect();'
           $r2 = @'
             PollFastReconnect();
+
+            // pwci-relobby: notice that this client's match is over. GameClient flips to
+            // EGameState::Finished both on the victory RPC and on any graceful disconnect from
+            // the game server, and that is the only end-of-match signal that always arrives:
+            // whether the session (and with it our channels) is destroyed right away, an hour
+            // later, or not while anyone is watching, is up to the game service. So run our own
+            // clock from the moment the game ends and tear the session down when it expires.
+            if ( g_pwciNoLauncher && s_pwci_relobby && !s_pwciRelobbyPending &&
+                 ( status == EContextStatus::InGame ) && gameClient &&
+                 ( gameClient->GameState() == lobby::EGameState::Finished ) )
+            {
+              s_pwciRelobbyWait -= dt;
+              if ( s_pwciRelobbyWait <= 0.0f )
+              {
+                MessageTrace( "pwci-relobby: the game is finished, leaving the session" );
+                s_pwciRelobbyPending = true;
+                status = EContextStatus::Cleanup;
+              }
+            }
+            else
+              s_pwciRelobbyWait = s_pwci_relobby_delay;
 
             // pwci-relobby: the match is over (or fast reconnect gave up) and Cleanup() has
             // already torn the context down, so log back in and land on the lobby screen
@@ -442,7 +469,9 @@ jobs:
                 s_pwciRelobbyPending = true;
           '@
 
-          foreach ($p in @(,@($a1,$r1)) + @(,@($a2,$r2)) + @(,@($a3,$r3)) + @(,@($a4,$r4))) {
+          # Order matters: r2 emits a second `status = EContextStatus::Cleanup;`, and .Replace
+          # matches substrings, so the OnChannelClosed anchor (a3) has to be consumed first.
+          foreach ($p in @(,@($a1,$r1)) + @(,@($a3,$r3)) + @(,@($a4,$r4)) + @(,@($a2,$r2))) {
             $anchor = $p[0]
             $repl = ($p[1] -replace "`r`n", "`n").TrimEnd("`n")
             $hits = ([regex]::Matches($s, [regex]::Escape($anchor))).Count
