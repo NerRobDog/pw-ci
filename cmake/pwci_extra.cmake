@@ -4,6 +4,16 @@
 # --- sources present in the published tree ---
 set( ALL_SRCS ${ALL_SRCS}
   ${SRC_DIR}/Game/PF/Server/LobbyPvx/CommonTypes.cpp
+  # Nival's CMakeLists explicitly re-adds two RPC stubs after excluding Game/PF/Server
+  # wholesale, but by the published tree's paths: Game/PF/Server/Lobby/... The directory
+  # is LobbyPvx here, so the ABSENT filter drops those lines and nothing puts them back.
+  # Nothing fails to LINK - the factories register themselves at static-init time - so the
+  # client only finds out at runtime: EntityMap::CreateEntity cannot find a factory for
+  # RIEntrance, returns a null handler, and rpc::Node::Query dereferences it. That is the
+  # access violation in EntityHandler::RegisterNode the moment the lobby pipe opens,
+  # right after "Node requested successfully(svcid=lobby/1)".
+  ${SRC_DIR}/Game/PF/Server/LobbyPvx/RLobbyIEntrance.auto.cpp
+  ${SRC_DIR}/Game/PF/Server/LobbyPvx/RLobbyIServerInstance.auto.cpp
   ${SRC_DIR}/Game/PF/Server/Statistic/StatisticsClientTypes.cpp
   ${SRC_DIR}/Game/PF/Server/Statistic/StatisticsCommonTypes.cpp
   ${SRC_DIR}/Game/PF/Server/Statistic/StatisticsDebugTypes.cpp
