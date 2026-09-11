@@ -1,0 +1,63 @@
+This repository holds two kinds of material, and they are not under the same
+terms. Saying so is not a formality: the Prime World sources are published under
+an agreement whose section 4 requires that a licensee's modifications be
+distributed freely, at no cost, and without additional commercial restrictions.
+A repository with no licence file at all is, by default, all rights reserved -
+which is exactly such a restriction. Hence this file.
+
+
+1. Our own work: MIT
+--------------------
+
+Everything under cmake/, stubs/ and tools/, and the build scaffolding of the
+workflows in .github/workflows/, is ours and is released under the MIT licence
+reproduced below.
+
+
+2. Prime World excerpts and the modifications we make to them
+-------------------------------------------------------------
+
+The patch steps in .github/workflows/ quote short passages of the Prime World
+client sources verbatim in order to find and replace them, and they contain the
+replacements we make. Those passages and those modifications are not ours to
+relicense. They are governed by the LICENSING AGREEMENT (OFFER) of NIVAL
+INTERNATIONAL LTD, effective 5 May 2024, published together with the game
+sources, under which:
+
+  - use is permitted for non-commercial purposes only;
+  - modifications made by a licensee automatically become part of the subject
+    matter of that agreement and are distributed freely, at no cost, and without
+    additional commercial restrictions;
+  - use ceases within three calendar days of a revocation notice published by
+    the licensor.
+
+The Prime World sources themselves are not redistributed here. The build fetches
+them at build time from the community repository
+Prime-World-Classic/prime-world-classic, whose own changes are, by the same
+section 4, under the same agreement.
+
+Nival is a registered trademark of NIVAL INTERNATIONAL LIMITED. This project is
+not affiliated with, endorsed by or supported by Nival.
+
+
+MIT License
+
+Copyright (c) 2026 satoru contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
