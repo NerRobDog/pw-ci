@@ -269,6 +269,110 @@ jobs:
             [System.IO.File]::WriteAllText((Resolve-Path $asl), $a)
           }
 
+      - name: Patch LocalGameContext (leaving a finished match returns to map selection)
+        shell: pwsh
+        run: |
+          # Offline (local_game) flow. "Exit" on the victory screen and "return to lobby" in the
+          # Esc menu both call AdventureScreen::ExitGame(true); LocalGameContext::LeaveGame drops
+          # the match objects, IsWaitingLeaveAck answers false at once, and the screen calls
+          # QuitApplicationEx("returntocastle"): the process exits, because in Nival's flow the
+          # castle client took over from there. There is no castle here, and the teardown of the
+          # battle screen on that path faults (seen 2026-09-15, legal6 on M1). So for
+          # ExitGame(true) keep the match objects alive, hold the screen in its "waiting for
+          # leave ack" state, and on the next Poll clear the screen stack, drop the match and push
+          # a fresh SelectGameModeScreen - the same screen Start() shows. ExitGame(false) ("quit
+          # the game" in the Esc menu) still quits. Files are read and written as Latin-1 because
+          # AdventureScreen.cpp carries cp1251 bytes, and CRLF is normalised so anchors match.
+          $enc = [System.Text.Encoding]::GetEncoding(28591)
+          $root = "game/pw/branches/r1117/Src"
+          function Load($rel) { $t = [System.IO.File]::ReadAllText((Resolve-Path "$root/$rel"), $enc); return $t.Replace("`r`n", "`n") }
+          function Save($rel, $t) { [System.IO.File]::WriteAllText((Resolve-Path "$root/$rel"), $t, $enc) }
+          function Swap($t, $old, $new, $what) {
+            $n = ([regex]::Matches($t, [regex]::Escape($old))).Count
+            if ($n -ne 1) { throw "pwci-relobby-local: anchor for $what found $n times" }
+            return $t.Replace($old, $new)
+          }
+          $L = { param([string[]]$lines) $lines -join "`n" }
+
+          $h = Load "PW_Client/LocalGameContext.h"
+          if ($h.Contains("pwci-relobby-local")) { Write-Host "already patched"; exit 0 }
+          $h = Swap $h '  virtual bool IsWaitingLeaveAck() { return false; }' '  virtual bool IsWaitingLeaveAck(); // pwci-relobby-local' 'IsWaitingLeaveAck'
+          $h = Swap $h '  void OnLobbyDataChange();' (& $L @('  void OnLobbyDataChange();', '  void PwciReturnToLobby(); // pwci-relobby-local')) 'OnLobbyDataChange'
+          Save "PW_Client/LocalGameContext.h" $h
+
+          $c = Load "PW_Client/LocalGameContext.cpp"
+          $c = Swap $c 'void LocalGameContext::Start()' (& $L @(
+            '// pwci-relobby-local: AdventureScreen::ExitGame records which exit the player took;',
+            '// s_pwciRelobbyPending holds the battle screen until Poll() has put the lobby back.',
+            'extern "C" { bool g_pwciExitToLobby = false; }',
+            'static bool s_pwciRelobbyPending = false;',
+            '',
+            'void LocalGameContext::Start()')) 'Start'
+          $c = Swap $c '  switch ( state )' (& $L @(
+            '  if ( s_pwciRelobbyPending ) // pwci-relobby-local',
+            '  {',
+            '    PwciReturnToLobby();',
+            '    return -1;',
+            '  }',
+            '',
+            '  switch ( state )')) 'Poll switch'
+          $c = Swap $c '  advScreeen = NULL;' (& $L @(
+            '  if ( g_pwciExitToLobby && !isSpectator && !replayRunner ) // pwci-relobby-local',
+            '  {',
+            '    s_pwciRelobbyPending = true;',
+            '    return;',
+            '  }',
+            '  advScreeen = NULL;')) 'LeaveGame'
+          $c = Swap $c 'bool LocalGameContext::IsGameReady()' (& $L @(
+            'bool LocalGameContext::IsWaitingLeaveAck() // pwci-relobby-local',
+            '{',
+            '  return s_pwciRelobbyPending;',
+            '}',
+            '',
+            'void LocalGameContext::PwciReturnToLobby() // pwci-relobby-local',
+            '{',
+            '  s_pwciRelobbyPending = false;',
+            '  g_pwciExitToLobby = false;',
+            '  MessageTrace( "pwci-relobby-local: match left, back to map selection" );',
+            '',
+            '  StopAsyncMapLoadingJob();',
+            '  NScreenCommands::PushCommand( NScreenCommands::CreateClearStackCommand() );',
+            '',
+            '  advScreeen = NULL;',
+            '  loadingScreeen = 0;',
+            '  heroScreen = 0;',
+            '  lobbyScreen = 0;',
+            '  gameLineup.clear();',
+            '  scheduler = NULL;',
+            '  transceiver = NULL;',
+            '  loadingThread = 0;',
+            '  mapDescription = 0;',
+            '  mapLoader = 0;',
+            '  replayWriter = 0;',
+            '  mapStartInfo = NCore::MapStartInfo();',
+            '',
+            '  Strong<NGameX::SelectGameModeScreen> screen = new NGameX::SelectGameModeScreen( this );',
+            '  NScreenCommands::PushCommand( NScreenCommands::CreatePushScreenCommand( screen ) );',
+            '  lobbyScreen = screen;',
+            '',
+            '  state = ELocalGameState::InLobby;',
+            '}',
+            '',
+            'bool LocalGameContext::IsGameReady()')) 'IsGameReady'
+          Save "PW_Client/LocalGameContext.cpp" $c
+
+          $a = Load "PF_GameLogic/AdventureScreen.cpp"
+          $a = Swap $a 'void AdventureScreen::ExitGame( bool _returnToCastle )' (& $L @(
+            'extern "C" { extern bool g_pwciExitToLobby; } // pwci-relobby-local, defined in LocalGameContext.cpp',
+            '',
+            'void AdventureScreen::ExitGame( bool _returnToCastle )')) 'ExitGame'
+          $a = Swap $a '  returnToCastle = _returnToCastle;' (& $L @(
+            '  returnToCastle = _returnToCastle;',
+            '  g_pwciExitToLobby = _returnToCastle; // pwci-relobby-local')) 'returnToCastle'
+          Save "PF_GameLogic/AdventureScreen.cpp" $a
+
+          Select-String -Path "$root/PW_Client/LocalGameContext.cpp","$root/PW_Client/LocalGameContext.h","$root/PF_GameLogic/AdventureScreen.cpp" -Pattern "pwci-relobby-local" | ForEach-Object { "RELOBBY: " + $_.Filename + ":" + $_.LineNumber }
+
       - name: Locate mt.exe from runner Windows Kits
         shell: pwsh
         run: |
