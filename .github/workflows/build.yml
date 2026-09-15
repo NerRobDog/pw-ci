@@ -317,6 +317,7 @@ jobs:
             '',
             '  switch ( state )')) 'Poll switch'
           $c = Swap $c '  advScreeen = NULL;' (& $L @(
+            '  DebugTrace( "pwci-relobby-local: LeaveGame toLobby=%d spectator=%d replay=%d", g_pwciExitToLobby ? 1 : 0, isSpectator ? 1 : 0, replayRunner ? 1 : 0 );',
             '  if ( g_pwciExitToLobby && !isSpectator && !replayRunner ) // pwci-relobby-local',
             '  {',
             '    s_pwciRelobbyPending = true;',
@@ -333,7 +334,7 @@ jobs:
             '{',
             '  s_pwciRelobbyPending = false;',
             '  g_pwciExitToLobby = false;',
-            '  MessageTrace( "pwci-relobby-local: match left, back to map selection" );',
+            '  DebugTrace( "pwci-relobby-local: match left, back to map selection" );',
             '',
             '  StopAsyncMapLoadingJob();',
             '  NScreenCommands::PushCommand( NScreenCommands::CreateClearStackCommand() );',
@@ -368,10 +369,67 @@ jobs:
             'void AdventureScreen::ExitGame( bool _returnToCastle )')) 'ExitGame'
           $a = Swap $a '  returnToCastle = _returnToCastle;' (& $L @(
             '  returnToCastle = _returnToCastle;',
-            '  g_pwciExitToLobby = _returnToCastle; // pwci-relobby-local')) 'returnToCastle'
+            '  g_pwciExitToLobby = _returnToCastle; // pwci-relobby-local',
+            '  DebugTrace( "pwci-relobby-local: ExitGame(returnToCastle=%d)", _returnToCastle ? 1 : 0 );')) 'returnToCastle'
           Save "PF_GameLogic/AdventureScreen.cpp" $a
 
           Select-String -Path "$root/PW_Client/LocalGameContext.cpp","$root/PW_Client/LocalGameContext.h","$root/PF_GameLogic/AdventureScreen.cpp" -Pattern "pwci-relobby-local" | ForEach-Object { "RELOBBY: " + $_.Filename + ":" + $_.LineNumber }
+
+      - name: Patch fullscreen geometry (the frame fits the screen and starts below the camera notch)
+        shell: pwsh
+        run: |
+          # Fullscreen here is a borderless window (pp.Windowed = 1) sized from the desktop.
+          # Rendering/rendermode.cpp GetDesktopResolution adds 22 px under Wine, because an old
+          # Wine reported the desktop one menu bar short; our Wine reports the full panel, so the
+          # frame came out 22 px taller than the screen (1728x1139 on 1728x1117, 2026-09-15):
+          # the bottom of the HUD was cut off and the camera could not scroll at the bottom edge.
+          # And MainFrame::ResizeWindow puts that window at y = 0, under the camera notch of a
+          # MacBook Pro. pw.sh passes the notch height (NSScreen safeAreaInsets.top) as
+          # PWCI_SAFE_TOP; the desktop height loses it and the window starts below it. Without
+          # the variable (0) the window fills the screen exactly.
+          $enc = [System.Text.Encoding]::GetEncoding(28591)
+          $root = "game/pw/branches/r1117/Src"
+          function Load($rel) { $t = [System.IO.File]::ReadAllText((Resolve-Path "$root/$rel"), $enc); return $t.Replace("`r`n", "`n") }
+          function Save($rel, $t) { [System.IO.File]::WriteAllText((Resolve-Path "$root/$rel"), $t, $enc) }
+          function Swap($t, $old, $new, $what, $count) {
+            $n = ([regex]::Matches($t, [regex]::Escape($old))).Count
+            if ($n -ne $count) { throw "pwci-safearea: anchor for $what found $n times, expected $count" }
+            return $t.Replace($old, $new)
+          }
+          $L = { param([string[]]$lines) $lines -join "`n" }
+
+          $m = Load "System/MainFrame.cpp"
+          if ($m.Contains("pwci-safearea")) { Write-Host "already patched"; exit 0 }
+          $m = Swap $m 'void NMainFrame::ResizeWindow( unsigned long width, unsigned long height, bool isFullScreen, bool isBorderless )' (& $L @(
+            '#include <stdlib.h> // pwci-safearea',
+            '// pwci-safearea: the height macOS keeps for the camera notch, passed by pw.sh.',
+            'extern "C" int pwci_safe_top( void )',
+            '{',
+            '  static int top = -1;',
+            '  if ( top < 0 )',
+            '  {',
+            '    const char * v = getenv( "PWCI_SAFE_TOP" );',
+            '    top = v ? atoi( v ) : 0;',
+            '    if ( top < 0 || top > 200 )',
+            '      top = 0;',
+            '    DebugTrace( "pwci-safearea: safe top %d", top );',
+            '  }',
+            '  return top;',
+            '}',
+            '',
+            'void NMainFrame::ResizeWindow( unsigned long width, unsigned long height, bool isFullScreen, bool isBorderless )')) 'ResizeWindow' 1
+          $m = Swap $m '::SetRect( &rect, 0, 0, width, height );' '::SetRect( &rect, 0, pwci_safe_top(), width, pwci_safe_top() + height ); // pwci-safearea' 'fullscreen rect' 2
+          Save "System/MainFrame.cpp" $m
+
+          $r = Load "Render/rendermode.cpp"
+          $r = Swap $r 'void GetDesktopResolution( unsigned int &width, unsigned int &height )' (& $L @(
+            'extern "C" int pwci_safe_top( void ); // pwci-safearea, defined in System/MainFrame.cpp',
+            '',
+            'void GetDesktopResolution( unsigned int &width, unsigned int &height )')) 'GetDesktopResolution' 1
+          $r = Swap $r 'height += 22;' 'height -= pwci_safe_top(); // pwci-safearea: our Wine reports the full panel; +22 overflowed it' 'height += 22' 1
+          Save "Render/rendermode.cpp" $r
+
+          Select-String -Path "$root/System/MainFrame.cpp","$root/Render/rendermode.cpp" -Pattern "pwci-safearea" | ForEach-Object { "SAFEAREA: " + $_.Filename + ":" + $_.LineNumber }
 
       - name: Locate mt.exe from runner Windows Kits
         shell: pwsh
