@@ -705,6 +705,35 @@ jobs:
           [System.IO.File]::WriteAllText((Resolve-Path $f), $s)
           Select-String -Path $f -Pattern "pwci-relaydirect" | ForEach-Object { "LOGINCLIENT: " + $_.Line }
 
+      - name: Patch NewLobbyGameClientPW.cpp (no web synchronizer post without the launcher, pwci-nofinishpost)
+        shell: pwsh
+        run: |
+          # At the end of a network match GameClientPW::OnVictory builds a JSON report and posts it to
+          # the community site's synchronizer (SERVER_IP_W_ARRAY, a 127.0.0.1 stub in this build).
+          # On a -dev_login LAN game that report hit a CRT invalid parameter inside JsonCpp on every
+          # client: first a crash in the parameter handler, then, with that fixed, an endless retry
+          # that froze the game (2026-09-17, reproduced unattended with destroy_all_main_buildings).
+          # Nobody listens there when no launcher started us, so do not build or send it at all.
+          $enc = [System.Text.Encoding]::GetEncoding(28591)
+          $path = Resolve-Path "game/pw/branches/r1117/Src/PW_Client/NewLobbyGameClientPW.cpp"
+          $t = [System.IO.File]::ReadAllText($path, $enc).Replace("`r`n", "`n")
+          if ($t.Contains("pwci-nofinishpost")) { Write-Host "already patched"; exit 0 }
+          $old = "static void SendFinishGameRequest(const StatisticService::RPC::SessionClientResults & _sessionResults, const NGameX::ReplayInfo & _replayInfo)`n{`n"
+          $new = $old + @(
+            '  extern bool g_pwciNoLauncher; // pwci-nofinishpost: set by Game.cpp on any -dev_login start',
+            '  if ( g_pwciNoLauncher )',
+            '  {',
+            '    DebugTrace( "pwci-nofinishpost: no launcher, the web game-finish report is not sent" );',
+            '    return;',
+            '  }',
+            ''
+          ) -join "`n"
+          $n = ([regex]::Matches($t, [regex]::Escape($old))).Count
+          if ($n -ne 1) { throw "pwci-nofinishpost: SendFinishGameRequest found $n times, expected 1" }
+          $t = $t.Replace($old, $new)
+          [System.IO.File]::WriteAllText($path, $t, $enc)
+          Select-String -Path $path -Pattern "pwci-nofinishpost" | ForEach-Object { "NOFINISHPOST: " + $_.LineNumber }
+
       - name: Locate mt.exe from runner Windows Kits
         shell: pwsh
         run: |
