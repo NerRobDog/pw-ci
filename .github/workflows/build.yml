@@ -431,6 +431,40 @@ jobs:
 
           Select-String -Path "$root/System/MainFrame.cpp","$root/Render/rendermode.cpp" -Pattern "pwci-safearea" | ForEach-Object { "SAFEAREA: " + $_.Filename + ":" + $_.LineNumber }
 
+      - name: Patch Game.cpp invalid-parameter handler (pwci-invparam)
+        shell: pwsh
+        run: |
+          # A LAN match froze the client at the end-of-match statistics (2026-09-17): a CRT call got
+          # an invalid parameter, and DebugTraceInvalidParamsHandler built nstl::wstring from the
+          # expression/function/file pointers, which the release CRT passes as NULL -> page fault
+          # in basic_string<wchar_t>(const wchar_t*) -> winedbg --auto -> frozen game. It then
+          # chained to the previous handler, which terminates the process anyway. Log what is
+          # known and return: the CRT function fails with EINVAL and the game carries on.
+          $enc = [System.Text.Encoding]::GetEncoding(28591)
+          $path = Resolve-Path "game/pw/branches/r1117/Src/PW_Client/Game.cpp"
+          $t = [System.IO.File]::ReadAllText($path, $enc).Replace("`r`n", "`n")
+          if ($t.Contains("pwci-invparam")) { Write-Host "already patched"; exit 0 }
+          $old = @(
+            '  DebugTrace( "Invalid parameter detected in function %s."',
+            '    " File: %s Line: %d\n", NStr::ToMBCS(function).c_str(), NStr::ToMBCS(file).c_str(), line );',
+            '',
+            '  DebugTrace( "Expression: %s\n", NStr::ToMBCS(expression).c_str() );'
+          ) -join "`n"
+          $new = @(
+            '  // pwci-invparam: the release CRT passes NULL for all three strings',
+            '  DebugTrace( "pwci-invparam: invalid parameter detected in function %s. File: %s Line: %d",',
+            '    function ? NStr::ToMBCS(function).c_str() : "(release CRT: no name)",',
+            '    file ? NStr::ToMBCS(file).c_str() : "?", line );',
+            '  if ( expression )',
+            '    DebugTrace( "Expression: %s", NStr::ToMBCS(expression).c_str() );',
+            '  return; // pwci-invparam: do not chain to the terminating default handler'
+          ) -join "`n"
+          $n = ([regex]::Matches($t, [regex]::Escape($old))).Count
+          if ($n -ne 1) { throw "pwci-invparam: handler body found $n times, expected 1" }
+          $t = $t.Replace($old, $new)
+          [System.IO.File]::WriteAllText($path, $t, $enc)
+          Select-String -Path $path -Pattern "pwci-invparam" | ForEach-Object { "INVPARAM: " + $_.LineNumber }
+
       - name: Patch Game.cpp for command-line login (-dev_login)
         shell: pwsh
         run: |
