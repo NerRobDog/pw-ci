@@ -734,6 +734,30 @@ jobs:
           [System.IO.File]::WriteAllText($path, $t, $enc)
           Select-String -Path $path -Pattern "pwci-nofinishpost" | ForEach-Object { "NOFINISHPOST: " + $_.LineNumber }
 
+      - name: Patch NewLobbyGameClientPW.cpp (network bots use the original road rotation, pwci-botlanes)
+        shell: pwsh
+        run: |
+          # The community client starts the bots of a network game with midOnly = true, which sends
+          # every bot down the middle road and ignores the ally_bots/enemy_bots cvars (FillBots). That
+          # suits the community's own matchmaking, not a LAN custom game: without the launcher, spread
+          # bots the way the original game does (top, middle, bottom in turn), and let bot-lanes.cfg
+          # pin heroes to roads. Bots run locally on every client, so every client needs the same cfg.
+          $enc = [System.Text.Encoding]::GetEncoding(28591)
+          $path = Resolve-Path "game/pw/branches/r1117/Src/PW_Client/NewLobbyGameClientPW.cpp"
+          $t = [System.IO.File]::ReadAllText($path, $enc).Replace("`r`n", "`n")
+          if ($t.Contains("pwci-botlanes")) { Write-Host "already patched"; exit 0 }
+          $old = "        advScreeen->StartBots( NGameX::AdventureScreen::FilterHumans, true, true );"
+          $new = @(
+            '        extern bool g_pwciNoLauncher; // pwci-botlanes: set by Game.cpp on any -dev_login start',
+            '        DebugTrace( "pwci-botlanes: bots start, midOnly=%d", g_pwciNoLauncher ? 0 : 1 );',
+            '        advScreeen->StartBots( NGameX::AdventureScreen::FilterHumans, true, !g_pwciNoLauncher ); // pwci-botlanes'
+          ) -join "`n"
+          $n = ([regex]::Matches($t, [regex]::Escape($old))).Count
+          if ($n -ne 1) { throw "pwci-botlanes: StartBots call found $n times, expected 1" }
+          $t = $t.Replace($old, $new)
+          [System.IO.File]::WriteAllText($path, $t, $enc)
+          Select-String -Path $path -Pattern "pwci-botlanes" | ForEach-Object { "BOTLANES: " + $_.LineNumber }
+
       - name: Locate mt.exe from runner Windows Kits
         shell: pwsh
         run: |
