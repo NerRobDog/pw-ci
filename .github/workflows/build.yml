@@ -736,7 +736,7 @@ jobs:
           $nn = ([regex]::Matches($t, [regex]::Escape($ns))).Count
           if ($nn -lt 1) { throw "pwci-nofinishpost: namespace lobby not found" }
           $idx = $t.IndexOf($ns)
-          $t = $t.Substring(0, $idx) + "`nextern bool g_pwciNoLauncher; // pwci-nofinishpost, pwci-botlanes: defined in GameContext.cpp`n" + $t.Substring($idx)
+          $t = $t.Substring(0, $idx) + "`nextern bool g_pwciNoLauncher; // pwci-nofinishpost and the bots-start patch below: defined in GameContext.cpp`n" + $t.Substring($idx)
           [System.IO.File]::WriteAllText($path, $t, $enc)
           Select-String -Path $path -Pattern "pwci-nofinishpost" | ForEach-Object { "NOFINISHPOST: " + $_.LineNumber }
 
@@ -751,7 +751,7 @@ jobs:
           $enc = [System.Text.Encoding]::GetEncoding(28591)
           $path = Resolve-Path "game/pw/branches/r1117/Src/PW_Client/NewLobbyGameClientPW.cpp"
           $t = [System.IO.File]::ReadAllText($path, $enc).Replace("`r`n", "`n")
-          if ($t.Contains("pwci-botlanes")) { Write-Host "already patched"; exit 0 }
+          if ($t.Contains("// pwci-botlanes")) { Write-Host "already patched"; exit 0 }
           $old = "        advScreeen->StartBots( NGameX::AdventureScreen::FilterHumans, true, true );"
           $new = @(
             '        DebugTrace( "pwci-botlanes: bots start, midOnly=%d", ::g_pwciNoLauncher ? 0 : 1 );',
