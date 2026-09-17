@@ -719,7 +719,7 @@ jobs:
           $t = [System.IO.File]::ReadAllText($path, $enc).Replace("`r`n", "`n")
           if ($t.Contains("pwci-nofinishpost")) { Write-Host "already patched"; exit 0 }
           $old = "static void SendFinishGameRequest(const StatisticService::RPC::SessionClientResults & _sessionResults, const NGameX::ReplayInfo & _replayInfo)`n{`n"
-          $new = $old + @(
+          $new = $old + (@(
             '  extern bool g_pwciNoLauncher; // pwci-nofinishpost: set by Game.cpp on any -dev_login start',
             '  if ( g_pwciNoLauncher )',
             '  {',
@@ -727,7 +727,7 @@ jobs:
             '    return;',
             '  }',
             ''
-          ) -join "`n"
+          ) -join "`n")
           $n = ([regex]::Matches($t, [regex]::Escape($old))).Count
           if ($n -ne 1) { throw "pwci-nofinishpost: SendFinishGameRequest found $n times, expected 1" }
           $t = $t.Replace($old, $new)
