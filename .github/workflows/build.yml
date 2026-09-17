@@ -763,6 +763,68 @@ jobs:
           [System.IO.File]::WriteAllText($path, $t, $enc)
           Select-String -Path $path -Pattern "pwci-botlanes" | ForEach-Object { "BOTLANES: " + $_.LineNumber }
 
+      - name: Patch PFCheat.cpp (no cheat commands from hotkeys or console without the launcher unless dev_cheats 1, pwci-cheatgate)
+        shell: pwsh
+        run: |
+          # This build is not _SHIPPING, so PFCheat.cpp is live: Profiles/custom.cfg binds CTRL+T to
+          # teleport_unit, CTRL+D to kill_unit, CTRL+P to set_pause, and AdventureScreen maps Ctrl+C to
+          # hero_set_active. Every such command goes into the lockstep as CmdCheat, runs on every client,
+          # and CmdCheat::Execute raises evHeroCheat, i.e. "<player> is cheating" in everybody's chat -
+          # once per key repeat (2026-09-17, a LAN match on the Mac). All user-facing cheats (binds and
+          # console) enter through CheatCommandProxy; map scripts (WorldScript) and the game's own
+          # set_pause call SendCheatCommand directly and are left alone. Without the launcher, drop the
+          # user-facing ones unless the dev_cheats cvar is set (console or private.cfg: dev_cheats 1).
+          $enc = [System.Text.Encoding]::GetEncoding(28591)
+          $path = Resolve-Path "game/pw/branches/r1117/Src/PF_GameLogic/PFCheat.cpp"
+          $t = [System.IO.File]::ReadAllText($path, $enc).Replace("`r`n", "`n")
+          if ($t.Contains("// pwci-cheatgate")) { Write-Host "already patched"; exit 0 }
+
+          $a1 = "`nnamespace NGameX`n{`n`nDEFINE_3_PARAM_CMD(0x11629400, CmdCheat,"
+          $r1 = "`n" + (@(
+            'extern bool g_pwciNoLauncher; // pwci-cheatgate: defined in PW_Client/GameContext.cpp, set on -dev_login',
+            'static int s_pwci_dev_cheats = 0; // pwci-cheatgate',
+            'REGISTER_DEV_VAR( "dev_cheats", s_pwci_dev_cheats, STORAGE_NONE );',
+            ''
+          ) -join "`n") + $a1.Substring(1)
+
+          $a2 = "static bool CheatCommandProxy(const char *name, const vector<wstring> &params)`n{`n"
+          $r2 = $a2 + (@(
+            '  if ( ::g_pwciNoLauncher && !s_pwci_dev_cheats ) // pwci-cheatgate',
+            '  {',
+            '    DebugTrace( "pwci-cheatgate: cheat command %s ignored (no launcher, dev_cheats 0)", name );',
+            '    return true;',
+            '  }',
+            ''
+          ) -join "`n")
+
+          foreach ($p in @(,@($a1,$r1)) + @(,@($a2,$r2))) {
+            $n = ([regex]::Matches($t, [regex]::Escape($p[0]))).Count
+            if ($n -ne 1) { throw "pwci-cheatgate: anchor <$($p[0])> matched $n times, expected 1" }
+            $t = $t.Replace($p[0], $p[1])
+          }
+          [System.IO.File]::WriteAllText($path, $t, $enc)
+          Select-String -Path $path -Pattern "pwci-cheatgate" | ForEach-Object { "CHEATGATE: " + $_.LineNumber + ": " + $_.Line }
+
+      - name: Patch NewLobbyClientPW.cpp (team headers of the custom lobby as Unicode escapes, pwci-lobbyteams)
+        shell: pwsh
+        run: |
+          # UpdateCustomLobbyPlayers writes the two team headers as wide literals typed in CP1251, and the
+          # file has no BOM. VC9 decodes a BOM-less source with the ANSI code page of the build machine -
+          # 1252 on the runner - so the exe carried U+00CA U+00EE ... ("Êîìàíäà Äîêòîâ:") no matter what
+          # ACP the game later runs with. Spell the same text as \x escapes so the source is ASCII there.
+          $enc = [System.Text.Encoding]::GetEncoding(28591)
+          $path = Resolve-Path "game/pw/branches/r1117/Src/PW_Client/NewLobbyClientPW.cpp"
+          $t = [System.IO.File]::ReadAllText($path, $enc).Replace("`r`n", "`n")
+          if ($t.Contains("// pwci-lobbyteams")) { Write-Host "already patched"; exit 0 }
+          $rx = 'lines\.push_back\( i \? L"[^"\n]+" : L"[^"\n]+" \);'
+          $n = ([regex]::Matches($t, $rx)).Count
+          if ($n -ne 1) { throw "pwci-lobbyteams: team header line matched $n times, expected 1" }
+          $new = 'lines.push_back( i ? L"\x041A\x043E\x043C\x0430\x043D\x0434\x0430 \x0410\x0434\x043E\x0440\x043D\x0438\x0439\x0446\x0435\x0432:" : L"\x041A\x043E\x043C\x0430\x043D\x0434\x0430 \x0414\x043E\x043A\x0442\x043E\x0432:" ); // pwci-lobbyteams'
+          $m = [regex]::Match($t, $rx)
+          $t = $t.Substring(0, $m.Index) + $new + $t.Substring($m.Index + $m.Length)
+          [System.IO.File]::WriteAllText($path, $t, $enc)
+          Select-String -Path $path -Pattern "pwci-lobbyteams" | ForEach-Object { "LOBBYTEAMS: " + $_.LineNumber + ": " + $_.Line }
+
       - name: Locate mt.exe from runner Windows Kits
         shell: pwsh
         run: |
